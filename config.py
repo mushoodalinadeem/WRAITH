@@ -9,7 +9,7 @@ import os
 # ---------------------------------------------------------------------------
 # Flask Settings
 # ---------------------------------------------------------------------------
-FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY", os.urandom(32).hex())
+FLASK_SECRET_KEY = os.getenv("SECRET_KEY", "wraith-dev-secret-key")
 FLASK_DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
 
 # ---------------------------------------------------------------------------
