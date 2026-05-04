@@ -27,6 +27,8 @@ from app.database import get_db_connection
 # ---------------------------------------------------------------------------
 # The deque natively drops the *oldest* item when maxlen is reached,
 # guaranteeing we always capture the freshest attack data during an HTTP flood.
+# WARNING: Only safe with exactly one producer thread and one consumer thread.
+# Do not add a second background worker without replacing this with queue.Queue.
 _request_queue = collections.deque(maxlen=config.QUEUE_MAXSIZE)
 
 # ---------------------------------------------------------------------------
