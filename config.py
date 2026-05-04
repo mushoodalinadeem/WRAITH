@@ -52,6 +52,10 @@ RATE_FLOOD_WINDOW = int(os.getenv("RATE_FLOOD_WINDOW", 1))           # per secon
 
 RATE_ENUM_THRESHOLD = int(os.getenv("RATE_ENUM_THRESHOLD", 5))       # unique paths
 RATE_ENUM_WINDOW = int(os.getenv("RATE_ENUM_WINDOW", 60))            # per 60 seconds
+ENUM_SENSITIVE_PATHS = [
+    '/admin', '/config', '/backup', '/api',
+    '/.env', '/etc', '/proc', '/phpmyadmin',
+]
 
 RATE_BRUTEFORCE_THRESHOLD = int(os.getenv("RATE_BRUTEFORCE_THRESHOLD", 3)) # failed POSTs
 RATE_BRUTEFORCE_WINDOW = int(os.getenv("RATE_BRUTEFORCE_WINDOW", 120))     # per 120 seconds
