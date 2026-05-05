@@ -62,14 +62,7 @@ RATE_BRUTEFORCE_WINDOW = int(os.getenv("RATE_BRUTEFORCE_WINDOW", 120))     # per
 
 # ---------------------------------------------------------------------------
 # Decoy Topology
-# TODO: Expand to all 9 honeypot endpoints once finalized in honeypot.py
 # ---------------------------------------------------------------------------
-HONEYPOT_ROUTES = [
-    '/admin/login',
-    '/api/users',
-    '/config/database',
-    '/backup',
-]
 
 # Specifically tracked by the Brute Force rule layer
 BRUTEFORCE_TARGET = '/admin/login'

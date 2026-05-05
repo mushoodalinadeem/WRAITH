@@ -67,12 +67,6 @@ def create_app():
     # Blueprints
     # -----------------------------------------------------------------------
     try:
-        from app.honeypot import honeypot_bp
-        app.register_blueprint(honeypot_bp)
-    except ImportError as e:
-        print(f"[WRAITH WARNING] Could not import honeypot blueprint: {e}") 
-
-    try:
         from app.api import api_bp
         # No prefix needed; proposal dictates /logs, /classify, /stream directly
         app.register_blueprint(api_bp)
@@ -85,5 +79,18 @@ def create_app():
         app.register_blueprint(admin_bp, url_prefix="/dashboard")
     except ImportError as e:
         print(f"[WRAITH WARNING] Could not import admin blueprint: {e}") 
+
+    try:
+        from app.sse import sse_bp
+        app.register_blueprint(sse_bp)
+    except ImportError as e:
+        print(f"[WRAITH WARNING] Could not import sse blueprint: {e}")
+
+    try:
+        from app.honeypot import honeypot_bp
+        # MUST BE REGISTERED LAST so its catch_all doesn't shadow the above blueprints
+        app.register_blueprint(honeypot_bp)
+    except ImportError as e:
+        print(f"[WRAITH WARNING] Could not import honeypot blueprint: {e}") 
 
     return app
