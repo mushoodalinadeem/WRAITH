@@ -1,71 +1,166 @@
 """
-app/api.py — REST API and real-time SSE stream for the WRAITH dashboard.
+app/api.py — REST API endpoints for WRAITH dashboard.
 
-Responsibilities:
-    - Serve historical forensic logs to the frontend via /logs.
-    - Provide a real-time Server-Sent Events (SSE) stream via /stream.
-    - Expose a manual /classify endpoint for demo purposes.
+Week 5: Full implementation with database queries and classifier integration.
+
+Endpoints:
+    GET /logs — recent log entries (paginated)
+    GET /logs/<int:log_id> - detailed log entry
+    POST /classify — on-demand single request classification
+    POST /demo/run — trigger full attack simulation sequence
+    GET /stats — summary statistics for dashboard header
+
+All routes registered on api_bp, mounted at root in __init__.py.
+SSE stream lives in sse.py at /stream — not duplicated here.
 """
 
-import json
-import time
-from flask import Blueprint, jsonify, request, Response
-
+from flask import Blueprint, jsonify, request
+import sqlite3
 import config
 from app.database import get_db_connection
 
-api_bp = Blueprint('api', __name__)
+try:
+    from app.classifier import classify_request
+except ImportError:
+    classify_request = None
 
-# ---------------------------------------------------------------------------
-# REST Endpoints
-# ---------------------------------------------------------------------------
-@api_bp.route('/logs', methods=['GET'])
+api_bp = Blueprint("api", __name__)
+
+
+@api_bp.route("/logs", methods=["GET"])
 def get_logs():
-    """
-    Fetch historical logs for the dashboard.
-    Defaults to the last 100 events to prevent massive payload sizes.
-    """
-    limit = request.args.get('limit', 100, type=int)
+    limit = request.args.get("limit", 50, type=int)
+    since_id = request.args.get("since_id", 0, type=int)
     
     conn = None
     try:
         conn = get_db_connection(config.DATABASE_PATH)
-        # Fetch descending so the newest logs are at the top
         logs = conn.execute(
-            "SELECT * FROM logs ORDER BY id DESC LIMIT ?", 
-            (limit,)
+            "SELECT id, timestamp, ip_address, method, path, attack_type, threat_score, layer FROM logs WHERE id > ? ORDER BY id DESC LIMIT ?", 
+            (since_id, limit)
         ).fetchall()
         
-        # Convert sqlite3.Row objects to standard dictionaries for JSON serialization
-        return jsonify([dict(row) for row in logs]), 200
+        return jsonify({
+            "status": "ok",
+            "logs": [dict(row) for row in logs],
+            "count": len(logs)
+        }), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         if conn:
             conn.close()
 
-@api_bp.route('/classify', methods=['POST'])
-def manual_classify():
-    """
-    Manual classification endpoint for Demo Step 5.
-    Allows testing payloads directly against the pipeline.
-    """
-    data = request.get_json() or {}
-    
-    # We drop it into the logger queue just like a real request, 
-    # but we spoof the source IP so we know it was a manual test.
-    test_request = {
-        "source_ip": data.get("ip", "127.0.0.1 (Manual Test)"),
-        "method": data.get("method", "POST"),
-        "path": data.get("path", "/api/test"),
-        "headers": data.get("headers", {}),
-        "payload": data.get("payload", ""),
-        "user_agent": "WRAITH Manual Tester"
-    }
-    
-    from app.logger import log_request
-    log_request(test_request)
-    
-    return jsonify({"status": "queued", "message": "Test payload sent to WRAITH engine."}), 202
+@api_bp.route("/logs/<int:log_id>", methods=["GET"])
+def get_log_detail(log_id):
+    conn = None
+    try:
+        conn = get_db_connection(config.DATABASE_PATH)
+        log = conn.execute(
+            "SELECT id, timestamp, ip_address, method, path, headers, payload, user_agent, attack_type, threat_score, confidence, layer, report FROM logs WHERE id = ?", 
+            (log_id,)
+        ).fetchone()
+        
+        if not log:
+            return jsonify({"status": "error", "message": "Log not found"}), 404
+            
+        return jsonify({
+            "status": "ok",
+            "log": dict(log)
+        }), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
 
+@api_bp.route("/classify", methods=["POST"])
+def classify():
+    request_data = request.get_json() or {}
+    
+    # Ensure all required keys exist to prevent ML feature extraction crashes
+    request_data.setdefault("source_ip", "127.0.0.1")
+    request_data.setdefault("method", "GET")
+    request_data.setdefault("path", "/")
+    request_data.setdefault("payload", "")
+    request_data.setdefault("user_agent", "")
+    request_data.setdefault("headers", {})
 
+    from app.logger import _check_rules, _quick_classify, _generate_report
+
+    attack_type, threat_score = _check_rules(request_data)
+    layer = "rule" if attack_type != "Normal" else "none"
+    confidence = 0.0
+
+    if attack_type == "Normal":
+        attack_type, threat_score = _quick_classify(request_data)
+        layer = "fallback" if attack_type != "Normal" else "none"
+
+    if attack_type == "Normal" and classify_request is not None:
+        ml_attack, ml_conf = classify_request(request_data)
+        if ml_attack != "Normal":
+            attack_type = ml_attack
+            confidence = ml_conf
+            layer = "ml"
+            threat_score = int(confidence * config.THREAT_SCORE_ML_MULTIPLIER)
+
+    report = _generate_report(attack_type, threat_score, layer, confidence, request_data)
+
+    return jsonify({
+        "status": "ok",
+        "attack_type": attack_type,
+        "confidence": confidence,
+        "threat_score": threat_score,
+        "layer": layer,
+        "report": report
+    }), 200
+
+@api_bp.route("/demo/run", methods=["POST"])
+def demo_run():
+    return jsonify({
+        "status": "ok",
+        "message": "Demo simulation must be run externally — see demo/simulate_attack.py"
+    }), 200
+
+@api_bp.route("/stats", methods=["GET"])
+def get_stats():
+    conn = None
+    try:
+        conn = get_db_connection(config.DATABASE_PATH)
+        
+        total_requests = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0] or 0
+        total_attacks = conn.execute("SELECT COUNT(*) FROM logs WHERE attack_type != 'Normal'").fetchone()[0] or 0
+        
+        attack_counts = conn.execute(
+            "SELECT attack_type, COUNT(*) as count FROM logs WHERE attack_type != 'Normal' GROUP BY attack_type"
+        ).fetchall()
+        
+        attacks_by_type = {row["attack_type"]: row["count"] for row in attack_counts}
+        
+        # Threat level logic using rolling 5-minute window
+        cursor = conn.execute(
+            "SELECT MAX(threat_score) FROM logs WHERE timestamp > datetime('now', '-5 minutes')"
+        )
+        max_score = cursor.fetchone()[0] or 0
+
+        if max_score >= config.THRESHOLD_ALERT:
+            level = "Alert"
+        elif max_score >= config.THRESHOLD_WARNING:
+            level = "Warning"
+        else:
+            level = "Normal"
+            
+        return jsonify({
+            "status": "ok",
+            "stats": {
+                "total_requests": total_requests,
+                "total_attacks": total_attacks,
+                "attacks_by_type": attacks_by_type,
+                "current_threat_level": level
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
