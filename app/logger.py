@@ -22,24 +22,18 @@ from collections import defaultdict
 import config
 from app.database import get_db_connection
 
-# ---------------------------------------------------------------------------
-# Architecture: Bounded Async Queue
-# ---------------------------------------------------------------------------
-# The deque natively drops the *oldest* item when maxlen is reached,
-# guaranteeing we always capture the freshest attack data during an HTTP flood.
-# WARNING: Only safe with exactly one producer thread and one consumer thread.
-# Do not add a second background worker without replacing this with queue.Queue.
+try:
+    from app.classifier import classify_request as _classify_request
+except ImportError:
+    _classify_request = None
+
 _request_queue = collections.deque(maxlen=config.QUEUE_MAXSIZE)
 
-# ---------------------------------------------------------------------------
-# Architecture: In-Memory Rate Counters
-# ---------------------------------------------------------------------------
 _flood_counter = defaultdict(list)
-_enum_counter = defaultdict(dict)  # Maps IP -> {path: last_seen_timestamp}
+_enum_counter = defaultdict(dict)
 _bruteforce_counter = defaultdict(list)
 _counter_lock = threading.Lock()
 
-# Initialize global thread state
 _worker_thread = None
 
 def log_request(request_data: dict) -> bool:
@@ -73,7 +67,7 @@ def _check_rules(request_data: dict) -> tuple:
     now = datetime.now(timezone.utc).timestamp()
 
     with _counter_lock:
-        # 1. HTTP Flood
+
         _flood_counter[ip] = [
             t for t in _flood_counter[ip]
             if now - t < config.RATE_FLOOD_WINDOW
@@ -83,7 +77,6 @@ def _check_rules(request_data: dict) -> tuple:
         if len(_flood_counter[ip]) > config.RATE_FLOOD_THRESHOLD:
             return ("HTTP Flood", config.THREAT_SCORE_RULE_BASELINE)
 
-        # 2. Directory Enumeration
         if any(path.startswith(s) or s in path for s in config.ENUM_SENSITIVE_PATHS):
             _enum_counter[ip] = {
                 p: t for p, t in _enum_counter[ip].items()
@@ -94,7 +87,6 @@ def _check_rules(request_data: dict) -> tuple:
             if len(_enum_counter[ip]) > config.RATE_ENUM_THRESHOLD:
                 return ("Directory Enumeration", config.THREAT_SCORE_RULE_BASELINE)
 
-        # 3. Web Brute Force
         if method == "POST" and path == config.BRUTEFORCE_TARGET:
             _bruteforce_counter[ip] = [
                 t for t in _bruteforce_counter[ip]
@@ -145,7 +137,7 @@ def _quick_classify(request_data: dict) -> tuple:
     if any(k in combined for k in CRLF_KEYWORDS):
         return ("CRLF Injection", 78)
 
-    # Buffer overflows are characterized by massive input, not specific keywords
+
     if len(payload) > 5000:
         return ("Buffer Overflow", 75)
 
@@ -217,58 +209,94 @@ def _write_to_db(request_data: dict, attack_type: str, threat_score: int,
         if conn:
             conn.close()
 
+def persist_log(request_data: dict, result: dict) -> None:
+    """Public wrapper for _write_to_db. Used by api.py /classify."""
+    _write_to_db(
+        request_data,
+        result["attack_type"],
+        result["threat_score"],
+        result["confidence"],
+        result["layer"],
+        result["report"]
+    )
+
+def run_pipeline(request_data: dict, skip_rules: bool = False) -> dict:
+    """
+    Public interface for the full classification pipeline.
+    Used by both the background worker and the /classify API endpoint.
+
+    Pipeline order:
+        1. Rule layer (_check_rules) — skipped if skip_rules=True
+        2. Fallback (_quick_classify)
+        3. ML layer (classifier.classify_request)
+        4. Report generation
+
+    Args:
+        request_data: dict with keys — source_ip, method, path, payload, etc.
+        skip_rules: If True, skip rate-based rules to avoid polluting
+                    in-memory counters (used by /classify endpoint).
+
+    Returns:
+        dict with keys: attack_type, threat_score, confidence, layer, report
+    """
+    attack_type = "Normal"
+    threat_score = 0
+    layer = None
+    confidence = 0.0
+
+    # 1. Rule layer (rate-based detection)
+    if not skip_rules:
+        attack_type, threat_score = _check_rules(request_data)
+        layer = "rule" if attack_type != "Normal" else None
+
+    # 2. Fallback (keyword-based detection)
+    if attack_type == "Normal":
+        attack_type, threat_score = _quick_classify(request_data)
+        layer = "fallback" if attack_type != "Normal" else None
+
+    # 3. ML layer
+    if attack_type == "Normal" and _classify_request is not None:
+        ml_attack, ml_confidence = _classify_request(request_data)
+        if ml_attack != "Normal" and ml_confidence >= config.ML_CONFIDENCE_THRESHOLD:
+            attack_type = ml_attack
+            confidence = ml_confidence
+            threat_score = int(confidence * config.THREAT_SCORE_ML_MULTIPLIER)
+            layer = "ml"
+
+    # 4. Report generation
+    report = _generate_report(attack_type, threat_score, layer, confidence, request_data)
+
+    return {
+        "attack_type": attack_type,
+        "threat_score": threat_score,
+        "confidence": confidence,
+        "layer": layer,
+        "report": report
+    }
+
 def _background_worker() -> None:
     """
     Infinite loop running in daemon thread.
-    Pulls from queue and processes each request through the full pipeline:
-        1. Rule layer
-        2. Fallback classifier
-        3. ML classifier
-        4. Report generation
-        5. Single INSERT
+    Pulls from queue and processes each request through run_pipeline(),
+    then writes the result to the database.
     """
-    # Import gracefully so we don't crash if ML isn't built yet
-    try:
-        from app.classifier import classify_request
-    except ImportError:
-        classify_request = None
-
     while True:
         try:
-            # deque.popleft() raises IndexError if empty
             request_data = _request_queue.popleft()
         except IndexError:
-            time.sleep(0.1) # Polling delay to prevent CPU spin
+            time.sleep(0.1)
             continue
 
         try:
-            attack_type, threat_score = _check_rules(request_data)
-            layer = "rule" if attack_type != "Normal" else None
-            confidence = 0.0
-
-            if attack_type == "Normal":
-                attack_type, threat_score = _quick_classify(request_data)
-                layer = "fallback" if attack_type != "Normal" else None
-                confidence = 0.0
-
-            if attack_type == "Normal" and classify_request is not None:
-                # classifier.py returns exactly (attack_type, confidence) to keep ML pure
-                ml_attack, ml_confidence = classify_request(request_data)
-                
-                # Enforce the ML Confidence Threshold
-                if ml_attack != "Normal" and ml_confidence >= config.ML_CONFIDENCE_THRESHOLD:
-                    attack_type = ml_attack
-                    confidence = ml_confidence
-                    threat_score = int(confidence * config.THREAT_SCORE_ML_MULTIPLIER)
-                    layer = "ml"
-            
-            report = _generate_report(
-                attack_type, threat_score, layer, confidence, request_data
-            )
+            result = run_pipeline(request_data, skip_rules=False)
 
             _write_to_db(
-                request_data, attack_type, threat_score,
-                confidence, layer, report
+                request_data,
+                result["attack_type"],
+                result["threat_score"],
+                result["confidence"],
+                result["layer"],
+                result["report"]
             )
 
         except Exception as e:

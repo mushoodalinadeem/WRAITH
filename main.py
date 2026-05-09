@@ -13,7 +13,9 @@ What this file does:
 Do not import this file — run it directly.
 """
 
-import os
+from dotenv import load_dotenv
+load_dotenv()
+
 from app import create_app
 from app.classifier import load_model
 import config
@@ -33,11 +35,12 @@ def _print_startup_banner(model_loaded: bool) -> None:
     print(f" Debug mode : {config.FLASK_DEBUG}")
     print("-" * 60)
     print(" Honeypot endpoints active:")
-    print("   /admin/login        /api/users")
-    print("   /config/database    /backup")
-    print("   /api/orders         /api/payments")
-    print("   /api/admin/export   /api/logs")
-    print("   /api/search         + catch-all for unknown paths")
+    routes = getattr(config, 'HONEYPOT_ROUTES', [])
+    for i in range(0, len(routes), 2):
+        col1 = f"   {routes[i]:<20}"
+        col2 = f"{routes[i+1]}" if i + 1 < len(routes) else ""
+        print((col1 + col2).rstrip())
+    print("   ... plus dynamic catch-all for unknown paths")
     print("-" * 60)
     print(" Detection layers:")
     print("   [ACTIVE]   Rule layer — Flood / Enumeration / Brute Force")

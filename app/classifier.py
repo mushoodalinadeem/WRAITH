@@ -16,6 +16,7 @@ logger.py computes threat_score from confidence using config.THREAT_SCORE_ML_MUL
 import config
 import os
 import math
+import re
 
 _model = None
 _label_encoder = None
@@ -58,23 +59,56 @@ def extract_features(request_data: dict) -> list:
     Feature order is LOCKED — must match training data column order exactly.
 
     Features:
-        Index 0 — url_length : int — len(path)
-        Index 1 — payload_length : int — len(payload body)
-        Index 2 — payload_entropy : float — Shannon entropy of payload
-        Index 3 — non_alphanum_ratio : float — special chars / total chars
-        Index 4 — url_encoded_count : int — count of %XX in path
-        Index 5 — path_depth : int — path.count('/')
-        Index 6 — method_is_post : int — 1 if POST else 0
-        Index 7 — user_agent_length : int — len(User-Agent header)
+        Index 0 — url_length
+        Index 1 — payload_length
+        Index 2 — payload_entropy (Shannon entropy)
+        Index 3 — non_alphanum_ratio
+        Index 4 — url_encoded_count (%XX hex sequences via regex)
+        Index 5 — path_depth
+        Index 6 — method_is_post
+        Index 7 — user_agent_length
 
-    Week 1: Returns 8 Zeros — placeholder.
-    Week 3: Full implementation with Shannon entropy calculation.
+    Week 2: Fully implemented — all 8 features extracted mathematically.
 
     Returns:
         List of 8 numeric features in the order above
     """
 
-    return [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    path = request_data.get("path", "/")
+    payload = request_data.get("payload", "")
+    method = request_data.get("method", "GET")
+    user_agent = request_data.get("user_agent", "")
+
+    url_length = float(len(path))
+    payload_length = float(len(payload))
+
+    payload_entropy = 0.0
+    if payload:
+        char_counts = {}
+        for char in payload:
+            char_counts[char] = char_counts.get(char, 0) + 1
+        for count in char_counts.values():
+            p = count / len(payload)
+            payload_entropy -= p * math.log2(p)
+
+    non_alphanum = sum(1 for c in payload if not c.isalnum() and not c.isspace())
+    non_alphanum_ratio = float(non_alphanum) / len(payload) if payload else 0.0
+
+    url_encoded_count = float(len(re.findall(r'%[0-9A-Fa-f]{2}', path)))
+    path_depth = float(path.count('/'))
+    method_is_post = 1.0 if method == "POST" else 0.0
+    user_agent_length = float(len(user_agent))
+
+    return [
+        url_length,
+        payload_length,
+        payload_entropy,
+        non_alphanum_ratio,
+        url_encoded_count,
+        path_depth,
+        method_is_post,
+        user_agent_length
+    ]
 
 def classify_request(request_data: dict) -> tuple:
     """
@@ -92,11 +126,10 @@ def classify_request(request_data: dict) -> tuple:
 
     Returns:
         (attack_type: str, confidence: float)
-        attack_type is one of config.ML_ATTACK_TYPES or 'Normal'
-        confidence is 0.0 to 1.0 — used by logger.py to compute threat_score
 
-    Week 1: Always returns ('Normal', 0.0).
-    Week 3: extract_features() -> model.predict_proba() -> label_encoder.
+    Week 2: Feature extraction is active (extract_features() computes
+             all 8 mathematical features). Inference is stubbed until
+             Week 3 when model.pkl is trained and loaded.
     """
     if not _load_attempted:
         load_model()
@@ -105,7 +138,7 @@ def classify_request(request_data: dict) -> tuple:
         return ("Normal", 0.0)
 
     # TODO (Week 3): Run inference here
-    # features = extract_features(request_data)
+    features = extract_features(request_data)
     # prediction = _model.predict_proba([features])
     # ...
     return ("Normal", 0.0)  # Placeholder until Week 3

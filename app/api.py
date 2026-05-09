@@ -1,8 +1,6 @@
 """
 app/api.py — REST API endpoints for WRAITH dashboard.
 
-Week 5: Full implementation with database queries and classifier integration.
-
 Endpoints:
     GET /logs — recent log entries (paginated)
     GET /logs/<int:log_id> - detailed log entry
@@ -14,15 +12,11 @@ All routes registered on api_bp, mounted at root in __init__.py.
 SSE stream lives in sse.py at /stream — not duplicated here.
 """
 
+from datetime import datetime, timezone
 from flask import Blueprint, jsonify, request
-import sqlite3
 import config
 from app.database import get_db_connection
-
-try:
-    from app.classifier import classify_request
-except ImportError:
-    classify_request = None
+from app.logger import run_pipeline, persist_log
 
 api_bp = Blueprint("api", __name__)
 
@@ -85,34 +79,15 @@ def classify():
     request_data.setdefault("payload", "")
     request_data.setdefault("user_agent", "")
     request_data.setdefault("headers", {})
+    request_data.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
 
-    from app.logger import _check_rules, _quick_classify, _generate_report
-
-    attack_type, threat_score = _check_rules(request_data)
-    layer = "rule" if attack_type != "Normal" else "none"
-    confidence = 0.0
-
-    if attack_type == "Normal":
-        attack_type, threat_score = _quick_classify(request_data)
-        layer = "fallback" if attack_type != "Normal" else "none"
-
-    if attack_type == "Normal" and classify_request is not None:
-        ml_attack, ml_conf = classify_request(request_data)
-        if ml_attack != "Normal":
-            attack_type = ml_attack
-            confidence = ml_conf
-            layer = "ml"
-            threat_score = int(confidence * config.THREAT_SCORE_ML_MULTIPLIER)
-
-    report = _generate_report(attack_type, threat_score, layer, confidence, request_data)
+    # skip_rules=True prevents polluting in-memory rate counters
+    result = run_pipeline(request_data, skip_rules=True)
+    persist_log(request_data, result)
 
     return jsonify({
         "status": "ok",
-        "attack_type": attack_type,
-        "confidence": confidence,
-        "threat_score": threat_score,
-        "layer": layer,
-        "report": report
+        **result
     }), 200
 
 @api_bp.route("/demo/run", methods=["POST"])
