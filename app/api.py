@@ -23,7 +23,8 @@ api_bp = Blueprint("api", __name__)
 
 @api_bp.route("/logs", methods=["GET"])
 def get_logs():
-    limit = request.args.get("limit", 50, type=int)
+    requested_limit = request.args.get("limit", 50, type=int)
+    limit = min(max(requested_limit, 1), config.API_MAX_LIMIT)
     since_id = request.args.get("since_id", 0, type=int)
     
     conn = None
@@ -40,7 +41,8 @@ def get_logs():
             "count": len(logs)
         }), 200
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        print(f"[WRAITH ERROR] /logs failed: {e}")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
     finally:
         if conn:
             conn.close()
@@ -63,7 +65,8 @@ def get_log_detail(log_id):
             "log": dict(log)
         }), 200
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        print(f"[WRAITH ERROR] /logs/<id> failed: {e}")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
     finally:
         if conn:
             conn.close()
@@ -74,12 +77,15 @@ def classify():
     
     # Ensure all required keys exist to prevent ML feature extraction crashes
     request_data.setdefault("source_ip", "127.0.0.1")
-    request_data.setdefault("method", "GET")
     request_data.setdefault("path", "/")
+    request_data.setdefault("query_string", "")
     request_data.setdefault("payload", "")
+    # Default to POST if a payload is explicitly provided in the classification request
+    default_method = "POST" if request_data["payload"] else "GET"
+    request_data.setdefault("method", default_method)
     request_data.setdefault("user_agent", "")
     request_data.setdefault("headers", {})
-    request_data.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
+    request_data.setdefault("timestamp", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
 
     # skip_rules=True prevents polluting in-memory rate counters
     result = run_pipeline(request_data, skip_rules=True)
@@ -135,7 +141,8 @@ def get_stats():
             }
         }), 200
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        print(f"[WRAITH ERROR] /stats failed: {e}")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
     finally:
         if conn:
             conn.close()

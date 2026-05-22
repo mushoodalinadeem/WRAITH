@@ -44,7 +44,8 @@ def init_db(db_path: str) -> None:
                 threat_score INTEGER DEFAULT 0,
                 confidence REAL DEFAULT 0.0,
                 layer TEXT DEFAULT NULL,
-                report TEXT
+                report TEXT,
+                is_simulation INTEGER DEFAULT 0
             )
         """)
 

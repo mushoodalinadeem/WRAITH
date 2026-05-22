@@ -23,6 +23,7 @@ def create_app():
     app.config["DATABASE_PATH"] = config.DATABASE_PATH
     app.config["MODEL_PATH"] = config.MODEL_PATH
     app.config["QUEUE_MAXSIZE"] = config.QUEUE_MAXSIZE
+    app.config["MAX_CONTENT_LENGTH"] = config.MAX_CONTENT_LENGTH
 
     db_dir = os.path.dirname(config.DATABASE_PATH)
     if db_dir:
@@ -47,50 +48,36 @@ def create_app():
     def internal_error(e):
         return jsonify({"error": "Internal server error", "status": 500}), 500
 
+    @app.errorhandler(413)
+    def payload_too_large(e):
+        return jsonify({"error": "Payload too large", "status": 413}), 413
+
     # -----------------------------------------------------------------------
     # Database & Logger Initialization
     # -----------------------------------------------------------------------
-    try:
-        from app.database import init_db
-        init_db(app.config["DATABASE_PATH"])
-    except ImportError as e:
-        print(f"[WRAITH WARNING] Could not import database: {e}")
+    from app.database import init_db
+    init_db(app.config["DATABASE_PATH"])
 
-    try:
-        # Start the background worker thread that processes the async queue
-        from app.logger import start_background_worker
-        start_background_worker()
-    except ImportError as e:
-        print(f"[WRAITH WARNING] Could not import logger: {e}")
+    # Start the background worker thread that processes the async queue
+    from app.logger import start_background_worker
+    start_background_worker()
 
     # -----------------------------------------------------------------------
     # Blueprints
     # -----------------------------------------------------------------------
-    try:
-        from app.api import api_bp
-        # No prefix needed; proposal dictates /logs, /classify, /stream directly
-        app.register_blueprint(api_bp)
-    except ImportError as e:
-        print(f"[WRAITH WARNING] Could not import api blueprint: {e}") 
+    from app.api import api_bp
+    # No prefix needed; proposal dictates /logs, /classify, /stream directly
+    app.register_blueprint(api_bp)
     
-    try:
-        from app.admin import admin_bp
-        # CHANGED: Avoids collision with honeypot's /admin/login decoy
-        app.register_blueprint(admin_bp, url_prefix="/dashboard")
-    except ImportError as e:
-        print(f"[WRAITH WARNING] Could not import admin blueprint: {e}") 
+    from app.admin import admin_bp
+    # CHANGED: Avoids collision with honeypot's /admin/login decoy
+    app.register_blueprint(admin_bp, url_prefix="/dashboard")
 
-    try:
-        from app.sse import sse_bp
-        app.register_blueprint(sse_bp)
-    except ImportError as e:
-        print(f"[WRAITH WARNING] Could not import sse blueprint: {e}")
+    from app.sse import sse_bp
+    app.register_blueprint(sse_bp)
 
-    try:
-        from app.honeypot import honeypot_bp
-        # MUST BE REGISTERED LAST so its catch_all doesn't shadow the above blueprints
-        app.register_blueprint(honeypot_bp)
-    except ImportError as e:
-        print(f"[WRAITH WARNING] Could not import honeypot blueprint: {e}") 
+    from app.honeypot import honeypot_bp
+    # MUST BE REGISTERED LAST so its catch_all doesn't shadow the above blueprints
+    app.register_blueprint(honeypot_bp)
 
     return app

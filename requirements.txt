@@ -6,3 +6,6 @@ numpy==2.2.3
 pandas==2.2.3
 
 python-dotenv==1.0.1
+gunicorn==22.0.0
+joblib==1.5.3
+requests==2.34.2

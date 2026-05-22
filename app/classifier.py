@@ -78,8 +78,10 @@ def extract_features(request_data: dict) -> list:
     payload = request_data.get("payload", "")
     method = request_data.get("method", "GET")
     user_agent = request_data.get("user_agent", "")
+    query_string = request_data.get("query_string", "")
 
-    url_length = float(len(path))
+    full_url = path + ("?" + query_string if query_string else "")
+    url_length = float(len(full_url))
     payload_length = float(len(payload))
 
     payload_entropy = 0.0
@@ -91,12 +93,14 @@ def extract_features(request_data: dict) -> list:
             p = count / len(payload)
             payload_entropy -= p * math.log2(p)
 
+    combined_text = full_url + " " + payload
+
     non_alphanum = sum(1 for c in payload if not c.isalnum() and not c.isspace())
     non_alphanum_ratio = float(non_alphanum) / len(payload) if payload else 0.0
 
-    url_encoded_count = float(len(re.findall(r'%[0-9A-Fa-f]{2}', path)))
+    url_encoded_count = float(len(re.findall(r'%[0-9A-Fa-f]{2}', combined_text)))
     path_depth = float(path.count('/'))
-    method_is_post = 1.0 if method == "POST" else 0.0
+    method_is_post = 1.0 if method.upper() == "POST" else 0.0
     user_agent_length = float(len(user_agent))
 
     return [

@@ -44,9 +44,10 @@ def get_logs_since(last_id: int, db_path: str) -> list:
                    threat_score, confidence, layer, report
             FROM logs
             WHERE id > ?
-            ORDER BY id ASC 
+            ORDER BY id ASC
+            LIMIT ?
             """,
-            (last_id,)
+            (last_id, config.SSE_BATCH_LIMIT)
         )
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
@@ -91,6 +92,9 @@ def _event_stream(db_path: str, start_id: int = 0):
             for row in new_rows:
                 last_id = row["id"]
                 yield _format_sse(row, last_id)
+        except GeneratorExit:
+            # Client disconnected cleanly, break the infinite loop
+            break
         except Exception as e:
             print(f"[WRAITH ERROR] SSE generator error: {e}")
 

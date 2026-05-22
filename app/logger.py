@@ -3,7 +3,7 @@ app/logger.py — Async bounded request queue and background processing worker.
 
 Responsibilities:
     - Receive HTTP request from Flask thread via log_request()
-    - Drop requests into bounded collections.deque(maxlen=1000)
+    - Drop requests into bounded queue.Queue(maxsize=1000)
     - Background thread processes queue in pipeline:
         1. Rule layer (_check_rules)
         2. Fallback (_quick_classify)
@@ -12,6 +12,7 @@ Responsibilities:
 """
 
 import collections
+import queue
 import threading
 import sqlite3
 import json
@@ -27,12 +28,55 @@ try:
 except ImportError:
     _classify_request = None
 
-_request_queue = collections.deque(maxlen=config.QUEUE_MAXSIZE)
+class BoundedQueue:
+    """
+    Thread-safe, memory-bounded FIFO queue using collections.deque.
+    Auto-evicts the oldest item when capacity is reached, preventing
+    blocking or dropping new requests under an HTTP flood.
+    """
+    def __init__(self, maxsize: int):
+        self.maxsize = maxsize
+        self.deque = collections.deque(maxlen=maxsize)
+        self.lock = threading.Lock()
+        self.not_empty = threading.Condition(self.lock)
 
+    def put(self, item) -> None:
+        with self.lock:
+            self.deque.append(item)
+            self.not_empty.notify()
+
+    def put_nowait(self, item) -> None:
+        self.put(item)
+
+    def get(self, timeout: float = None):
+        with self.lock:
+            if not self.deque:
+                if timeout is None:
+                    while not self.deque:
+                        self.not_empty.wait()
+                else:
+                    end_time = time.time() + timeout
+                    while not self.deque:
+                        remaining = end_time - time.time()
+                        if remaining <= 0:
+                            raise queue.Empty
+                        self.not_empty.wait(remaining)
+            return self.deque.popleft()
+
+_request_queue = BoundedQueue(maxsize=config.QUEUE_MAXSIZE)
+
+# NOTE: Rate-limiting counters live in local volatile memory.
+# In a multi-worker production environment (e.g. Gunicorn with multiple workers),
+# requests are load-balanced across isolated worker processes. Because state is
+# not shared, rate limiting will fail to accurately track request thresholds.
+# WRAITH must be pinned to a single WSGI worker process (e.g., `gunicorn -w 1 main:app`)
+# to ensure rate-limiting accuracy, or these counters must be refactored to use
+# an external shared-memory store like Redis.
 _flood_counter = defaultdict(list)
 _enum_counter = defaultdict(dict)
 _bruteforce_counter = defaultdict(list)
 _counter_lock = threading.Lock()
+_last_cleanup = 0.0
 
 _worker_thread = None
 
@@ -46,10 +90,10 @@ def log_request(request_data: dict) -> bool:
                       headers, payload, user_agent
     
     Returns:
-        True always, since deque naturally drops oldest if full.
+        True
     """
-    request_data["timestamp"] = datetime.now(timezone.utc).isoformat()
-    _request_queue.append(request_data)
+    request_data["timestamp"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    _request_queue.put(request_data)
     return True
 
 def _check_rules(request_data: dict) -> tuple:
@@ -67,6 +111,11 @@ def _check_rules(request_data: dict) -> tuple:
     now = datetime.now(timezone.utc).timestamp()
 
     with _counter_lock:
+        # EMERGENCY BRAKE: Prevent OOM from distributed burst scans
+        if len(_flood_counter) > config.EMERGENCY_COUNTER_LIMIT:
+            _flood_counter.clear()
+            _enum_counter.clear()
+            _bruteforce_counter.clear()
 
         _flood_counter[ip] = [
             t for t in _flood_counter[ip]
@@ -77,17 +126,19 @@ def _check_rules(request_data: dict) -> tuple:
         if len(_flood_counter[ip]) > config.RATE_FLOOD_THRESHOLD:
             return ("HTTP Flood", config.THREAT_SCORE_RULE_BASELINE)
 
-        if any(path.startswith(s) or s in path for s in config.ENUM_SENSITIVE_PATHS):
-            _enum_counter[ip] = {
-                p: t for p, t in _enum_counter[ip].items()
-                if now - t < config.RATE_ENUM_WINDOW
-            }
+        # Count all unknown paths — exclude only known honeypot routes
+        _enum_counter[ip] = {
+            p: t for p, t in _enum_counter[ip].items()
+            if now - t < config.RATE_ENUM_WINDOW
+        }
+
+        if path not in config.HONEYPOT_ROUTES:
             _enum_counter[ip][path] = now
             
             if len(_enum_counter[ip]) > config.RATE_ENUM_THRESHOLD:
                 return ("Directory Enumeration", config.THREAT_SCORE_RULE_BASELINE)
 
-        if method == "POST" and path == config.BRUTEFORCE_TARGET:
+        if method.upper() == "POST" and path == config.BRUTEFORCE_TARGET:
             _bruteforce_counter[ip] = [
                 t for t in _bruteforce_counter[ip]
                 if now - t < config.RATE_BRUTEFORCE_WINDOW
@@ -115,7 +166,8 @@ def _quick_classify(request_data: dict) -> tuple:
     """
     payload = (request_data.get("payload") or "").lower()
     path = (request_data.get("path") or "").lower()
-    combined = payload + " " + path
+    query_string = (request_data.get("query_string") or "").lower()
+    combined = payload + " " + path + ("?" + query_string if query_string else "")
 
     SQL_KEYWORDS = ["select ", "union ", "insert ", "drop ", "' or ",
                     "1=1", "--", "xp_", "exec(", "cast("]
@@ -126,20 +178,19 @@ def _quick_classify(request_data: dict) -> tuple:
     CRLF_KEYWORDS = ["%0d%0a", "%0a", "%0d", "\r\n", "content-type:"]
 
     if any(k in combined for k in SQL_KEYWORDS):
-        return ("SQL Injection", 85)
+        return ("SQL Injection", config.FALLBACK_SCORE_SQLI)
 
     if any(k in combined for k in XSS_KEYWORDS):
-        return ("XSS", 80)
+        return ("XSS", config.FALLBACK_SCORE_XSS)
 
     if any(k in combined for k in TRAVERSAL_KEYWORDS):
-        return ("File Disclosure", 80)
+        return ("File Disclosure", config.FALLBACK_SCORE_TRAVERSAL)
 
     if any(k in combined for k in CRLF_KEYWORDS):
-        return ("CRLF Injection", 78)
+        return ("CRLF Injection", config.FALLBACK_SCORE_CRLF)
 
-
-    if len(payload) > 5000:
-        return ("Buffer Overflow", 75)
+    if len(payload) > config.BUFFER_OVERFLOW_PAYLOAD_THRESHOLD:
+        return ("Buffer Overflow", config.FALLBACK_SCORE_OVERFLOW)
 
     return ("Normal", 0)
 
@@ -150,11 +201,13 @@ def _generate_report(attack_type: str, threat_score: int, layer: str,
     """
     ip = request_data.get("source_ip", "unknown")
     path = request_data.get("path", "/")
+    query_string = request_data.get("query_string", "")
+    full_path = path + ("?" + query_string if query_string else "")
     method = request_data.get("method", "GET")
 
     if attack_type == "Normal":
         return (
-            f"Normal request from {ip} to {method} {path}. "
+            f"Normal request from {ip} to {method} {full_path}. "
             f"No threat detected."
         )
 
@@ -168,15 +221,20 @@ def _generate_report(attack_type: str, threat_score: int, layer: str,
         f"THREAT DETECTED — {attack_type} | "
         f"Score: {threat_score}/100 | "
         f"Source: {ip} | "
-        f"Target: {method} {path} | "
+        f"Target: {method} {full_path} | "
         f"Detected by: {layer_desc}"
     )
 
 def _write_to_db(request_data: dict, attack_type: str, threat_score: int,
-                confidence: float, layer: str, report: str) -> None:
+                confidence: float, layer: str, report: str,
+                is_simulation: bool = False) -> None:
     """
     Write all request fields in a single INSERT.
     Connection opened and closed per write — WAL mode handles concurrency.
+
+    Args:
+        is_simulation: If True, marks this row as test/simulation data
+                       so forensic queries can filter it out.
     """
     conn = None
     try:
@@ -186,13 +244,13 @@ def _write_to_db(request_data: dict, attack_type: str, threat_score: int,
                 timestamp, ip_address, method, path,
                 headers, payload, user_agent,
                 attack_type, threat_score, confidence,
-                layer, report
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                layer, report, is_simulation
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             request_data.get("timestamp"),
             request_data.get("source_ip"),
             request_data.get("method"),
-            request_data.get("path"),
+            request_data.get("path", "") + ("?" + request_data.get("query_string") if request_data.get("query_string") else ""),
             json.dumps(request_data.get("headers", {})),
             request_data.get("payload"),
             request_data.get("user_agent"),
@@ -200,7 +258,8 @@ def _write_to_db(request_data: dict, attack_type: str, threat_score: int,
             threat_score,
             confidence,
             layer,
-            report
+            report,
+            1 if is_simulation else 0
         ))
         conn.commit()
     except sqlite3.Error as e:
@@ -210,14 +269,16 @@ def _write_to_db(request_data: dict, attack_type: str, threat_score: int,
             conn.close()
 
 def persist_log(request_data: dict, result: dict) -> None:
-    """Public wrapper for _write_to_db. Used by api.py /classify."""
+    """Public wrapper for _write_to_db. Used by api.py /classify.
+    Marks the entry as simulation data so forensic queries can exclude it."""
     _write_to_db(
         request_data,
         result["attack_type"],
         result["threat_score"],
         result["confidence"],
         result["layer"],
-        result["report"]
+        result["report"],
+        is_simulation=True
     )
 
 def run_pipeline(request_data: dict, skip_rules: bool = False) -> dict:
@@ -274,17 +335,69 @@ def run_pipeline(request_data: dict, skip_rules: bool = False) -> dict:
         "report": report
     }
 
+def _cleanup_stale_counters() -> None:
+    """
+    Remove IP keys whose sliding windows have fully expired.
+    Prevents unbounded memory growth from distributed scans
+    where thousands of unique IPs each leave an empty list/dict.
+
+    Runs every COUNTER_CLEANUP_INTERVAL seconds (default 300 = 5 min).
+    Called from _background_worker(), NOT from _check_rules() — avoids
+    adding cleanup cost to the per-request hot path.
+    """
+    global _last_cleanup
+    now = time.time()
+    if now - _last_cleanup < config.COUNTER_CLEANUP_INTERVAL:
+        return
+    _last_cleanup = now
+
+    with _counter_lock:
+        for ip in list(_flood_counter):
+            _flood_counter[ip] = [
+                t for t in _flood_counter[ip]
+                if now - t < config.RATE_FLOOD_WINDOW
+            ]
+            if not _flood_counter[ip]:
+                del _flood_counter[ip]
+
+        for ip in list(_enum_counter):
+            _enum_counter[ip] = {
+                p: t for p, t in _enum_counter[ip].items()
+                if now - t < config.RATE_ENUM_WINDOW
+            }
+            if not _enum_counter[ip]:
+                del _enum_counter[ip]
+
+        for ip in list(_bruteforce_counter):
+            _bruteforce_counter[ip] = [
+                t for t in _bruteforce_counter[ip]
+                if now - t < config.RATE_BRUTEFORCE_WINDOW
+            ]
+            if not _bruteforce_counter[ip]:
+                del _bruteforce_counter[ip]
+
+
 def _background_worker() -> None:
     """
     Infinite loop running in daemon thread.
     Pulls from queue and processes each request through run_pipeline(),
     then writes the result to the database.
+
+    Cleanup runs on a loop counter (every 500 iterations) to avoid
+    calling _cleanup_stale_counters() on every single iteration.
+    A fallback check also runs when the queue is idle.
     """
+    loop_count = 0
     while True:
+        loop_count += 1
+        if loop_count >= 500:
+            _cleanup_stale_counters()
+            loop_count = 0
+
         try:
-            request_data = _request_queue.popleft()
-        except IndexError:
-            time.sleep(0.1)
+            request_data = _request_queue.get(timeout=0.1)
+        except queue.Empty:
+            _cleanup_stale_counters()
             continue
 
         try:
@@ -296,7 +409,8 @@ def _background_worker() -> None:
                 result["threat_score"],
                 result["confidence"],
                 result["layer"],
-                result["report"]
+                result["report"],
+                is_simulation=False
             )
 
         except Exception as e:

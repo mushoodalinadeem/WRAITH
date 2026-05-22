@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 *.pkl
 *.db
+*.db-wal
+*.db-shm
 .env
 data/
-.env
-.env

@@ -31,6 +31,7 @@ def _extract_request_data() -> dict:
         "source_ip": request.remote_addr or "0.0.0.0",
         "method": request.method,
         "path": request.path,
+        "query_string": request.query_string.decode('utf-8', errors='ignore'),
         "headers": dict(request.headers),
         "payload": request.get_data(as_text=True),
         "user_agent": request.headers.get("User-Agent", "")
