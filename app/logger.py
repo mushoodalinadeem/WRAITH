@@ -28,7 +28,10 @@ try:
 except ImportError:
     _classify_request = None
 
-class BoundedQueue:
+# Uses a custom evicting queue instead of queue.Queue(maxsize=1000).
+# queue.Queue blocks or raises Full — neither drops oldest.
+# BoundedEvictingQueue uses deque(maxlen) which atomically evicts oldest on overflow.
+class BoundedEvictingQueue:
     """
     Thread-safe, memory-bounded FIFO queue using collections.deque.
     Auto-evicts the oldest item when capacity is reached, preventing
@@ -63,7 +66,7 @@ class BoundedQueue:
                         self.not_empty.wait(remaining)
             return self.deque.popleft()
 
-_request_queue = BoundedQueue(maxsize=config.QUEUE_MAXSIZE)
+_request_queue = BoundedEvictingQueue(maxsize=config.QUEUE_MAXSIZE)
 
 # NOTE: Rate-limiting counters live in local volatile memory.
 # In a multi-worker production environment (e.g. Gunicorn with multiple workers),
@@ -126,13 +129,13 @@ def _check_rules(request_data: dict) -> tuple:
         if len(_flood_counter[ip]) > config.RATE_FLOOD_THRESHOLD:
             return ("HTTP Flood", config.THREAT_SCORE_RULE_BASELINE)
 
-        # Count all unknown paths — exclude only known honeypot routes
         _enum_counter[ip] = {
             p: t for p, t in _enum_counter[ip].items()
             if now - t < config.RATE_ENUM_WINDOW
         }
 
-        if path not in config.HONEYPOT_ROUTES:
+        _ENUM_IGNORE = {"/favicon.ico", "/robots.txt"}
+        if path not in _ENUM_IGNORE:
             _enum_counter[ip][path] = now
             
             if len(_enum_counter[ip]) > config.RATE_ENUM_THRESHOLD:

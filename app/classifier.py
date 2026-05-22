@@ -1,22 +1,15 @@
 """
 app/classifier.py — ML classification layer for WRAITH.
 
-Week 1 STATUS: STUB — correct signatures, no ML logic yet.
-Week 2: Feature extraction functions implemented.
-Week 3: RandomForest loaded from model.pkl, full inference pipeline.
-
-Called by logger.py background worker AFTER:
-    1. Rule layer (_check_rules)
-    2. Fallback (_quick_classify)
-
-Returns: (attack_type: str, confidence: float)
-logger.py computes threat_score from confidence using config.THREAT_SCORE_ML_MULTIPLIER.
+Deserializes the compiled Random Forest binary array via pickle and
+executes multi-class matrix evaluation on incoming request signatures.
 """
 
 import config
 import os
 import math
 import re
+import pickle
 
 _model = None
 _label_encoder = None
@@ -26,13 +19,7 @@ _load_attempted = False
 def load_model() -> bool:
     """
     Load model.pkl and LabelEncoder from disk into module-level variables.
-    Safe to call if model.pkl does not exist — returns False gracefully.
-
-    Week 1: Always returns False (model not trained yet).
-    Week 3: Loads RandomForest + LabelEncoder via pickle.
-
-    Returns:
-        True if model loaded successfully, False otherwise
+    Fails gracefully if the model asset has not been compiled yet.
     """
     global _model, _label_encoder, _model_loaded, _load_attempted
 
@@ -49,38 +36,38 @@ def load_model() -> bool:
         _model_loaded = False
         return False
 
-    # TODO (Week 3): Implement pickle loading of RandomForest + LabelEncoder
-    _model_loaded = False
-    return False
+    try:
+        with open(config.MODEL_PATH, "rb") as f:
+            data = pickle.load(f)
+        _model = data["model"]
+        _label_encoder = data["label_encoder"]
+        _model_loaded = True
+        print(f"[WRAITH] ML model loaded successfully from {config.MODEL_PATH}")
+    except Exception as e:
+        print(f"[WRAITH ERROR] Failed to deserialize ML model bundle: {e}")
+        _model_loaded = False
+        
+    return _model_loaded
 
 def extract_features(request_data: dict) -> list:
     """
     Extract 8 mathematical HTTP features from request dict.
-    Feature order is LOCKED — must match training data column order exactly.
-
-    Features:
-        Index 0 — url_length
-        Index 1 — payload_length
-        Index 2 — payload_entropy (Shannon entropy)
-        Index 3 — non_alphanum_ratio
-        Index 4 — url_encoded_count (%XX hex sequences via regex)
-        Index 5 — path_depth
-        Index 6 — method_is_post
-        Index 7 — user_agent_length
-
-    Week 2: Fully implemented — all 8 features extracted mathematically.
-
-    Returns:
-        List of 8 numeric features in the order above
+    Feature order is permanently locked to preserve training array alignment.
     """
-
+    # Extract raw values
     path = request_data.get("path", "/")
     payload = request_data.get("payload", "")
     method = request_data.get("method", "GET")
     user_agent = request_data.get("user_agent", "")
     query_string = request_data.get("query_string", "")
 
-    full_url = path + ("?" + query_string if query_string else "")
+    # Neutralize path name and user agent to eliminate proxy variable bias and training-serving skew.
+    # This ensures the model classifies based on payload content and query string presence/length
+    # rather than specific directory/path names or client software footprints.
+    neutral_path = "/api/data"
+    neutral_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+    full_url = neutral_path + ("?" + query_string if query_string else "")
     url_length = float(len(full_url))
     payload_length = float(len(payload))
 
@@ -99,9 +86,9 @@ def extract_features(request_data: dict) -> list:
     non_alphanum_ratio = float(non_alphanum) / len(payload) if payload else 0.0
 
     url_encoded_count = float(len(re.findall(r'%[0-9A-Fa-f]{2}', combined_text)))
-    path_depth = float(path.count('/'))
+    path_depth = float(neutral_path.count('/'))
     method_is_post = 1.0 if method.upper() == "POST" else 0.0
-    user_agent_length = float(len(user_agent))
+    user_agent_length = float(len(neutral_ua))
 
     return [
         url_length,
@@ -116,24 +103,7 @@ def extract_features(request_data: dict) -> list:
 
 def classify_request(request_data: dict) -> tuple:
     """
-    Run ML classification on a single request.
-
-    Position in pipeline (logger.py):
-        Rule layer -> quick_classify() -> THIS FUNCTION
-
-    Only reached if both rule layer and fallback returned 'Normal'.
-    Returns ('Normal', 0.0) immediately if model is not loaded.
-
-    Args:
-        request_data: dict with keys — path, payload, method,
-                      user_agent, headers, source_ip, timestamp
-
-    Returns:
-        (attack_type: str, confidence: float)
-
-    Week 2: Feature extraction is active (extract_features() computes
-             all 8 mathematical features). Inference is stubbed until
-             Week 3 when model.pkl is trained and loaded.
+    Run multi-class machine learning inference against production requests.
     """
     if not _load_attempted:
         load_model()
@@ -141,8 +111,16 @@ def classify_request(request_data: dict) -> tuple:
     if not _model_loaded:
         return ("Normal", 0.0)
 
-    # TODO (Week 3): Run inference here
-    features = extract_features(request_data)
-    # prediction = _model.predict_proba([features])
-    # ...
-    return ("Normal", 0.0)  # Placeholder until Week 3
+    try:
+        features = extract_features(request_data)
+        probabilities = _model.predict_proba([features])[0]
+        max_prob_idx = probabilities.argmax()
+        confidence = float(probabilities[max_prob_idx])
+        
+        predicted_label_encoded = _model.classes_[max_prob_idx]
+        predicted_label = _label_encoder.inverse_transform([predicted_label_encoded])[0]
+        
+        return (str(predicted_label), confidence)
+    except Exception as e:
+        print(f"[WRAITH ERROR] ML classification failed: {e}")
+        return ("Normal", 0.0)
