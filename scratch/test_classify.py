@@ -55,6 +55,16 @@ tests = [
         }
     },
     {
+        "name": "URL-Encoded SQL Injection Bypassing Fallback",
+        "data": {
+            "path": "/api/search",
+            "method": "GET",
+            "query_string": "id=1%27or%271%27%3D%271",
+            "payload": "",
+            "user_agent": "Mozilla/5.0"
+        }
+    },
+    {
         "name": "XSS Bypassing Fallback",
         "data": {
             "path": "/api/search",
