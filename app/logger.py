@@ -173,7 +173,7 @@ def _quick_classify(request_data: dict) -> tuple:
     combined = payload + " " + path + ("?" + query_string if query_string else "")
 
     SQL_KEYWORDS = ["select ", "union ", "insert ", "drop ", "' or ",
-                    "1=1", "--", "xp_", "exec(", "cast("]
+                    "1=1", "--", "xp_", "exec(", "cast(", "'or'"]
     XSS_KEYWORDS = ["<script", "javascript:", "onerror=",
                     "onload=", "alert(", "document.cookie"]
     TRAVERSAL_KEYWORDS = ["../", "..\\", "%2e%2e",
