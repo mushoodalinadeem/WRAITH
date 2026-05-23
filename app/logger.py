@@ -28,7 +28,7 @@ try:
 except ImportError:
     _classify_request = None
 
-_ENUM_IGNORE = frozenset(["/favicon.ico", "/robots.txt"])
+_ENUM_IGNORE = frozenset({"/favicon.ico", "/robots.txt"})
 
 # Uses a custom evicting queue instead of queue.Queue(maxsize=1000).
 # queue.Queue blocks or raises Full — neither drops oldest.
