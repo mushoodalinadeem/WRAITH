@@ -28,6 +28,8 @@ try:
 except ImportError:
     _classify_request = None
 
+_ENUM_IGNORE = frozenset(["/favicon.ico", "/robots.txt"])
+
 # Uses a custom evicting queue instead of queue.Queue(maxsize=1000).
 # queue.Queue blocks or raises Full — neither drops oldest.
 # BoundedEvictingQueue uses deque(maxlen) which atomically evicts oldest on overflow.
@@ -134,7 +136,6 @@ def _check_rules(request_data: dict) -> tuple:
             if now - t < config.RATE_ENUM_WINDOW
         }
 
-        _ENUM_IGNORE = {"/favicon.ico", "/robots.txt"}
         if path not in _ENUM_IGNORE:
             _enum_counter[ip][path] = now
             
@@ -159,9 +160,7 @@ def _quick_classify(request_data: dict) -> tuple:
     Guarantees demo output even if model.pkl is missing or corrupted.
     Issue M2 fix from proposal review.
     
-    Note: Query string blind spot. This only checks payload and path.
-    A GET request with SQLi in the query string won't trigger fallback.
-    The ML layer will catch this via feature extraction.
+    Note: Checks payload, path, and query string.
 
     Returns:
         (attack_type: str, threat_score: int)
