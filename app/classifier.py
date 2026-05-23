@@ -54,20 +54,13 @@ def extract_features(request_data: dict) -> list:
     Extract 8 mathematical HTTP features from request dict.
     Feature order is permanently locked to preserve training array alignment.
     """
-    # Extract raw values
     path = request_data.get("path", "/")
     payload = request_data.get("payload", "")
     method = request_data.get("method", "GET")
     user_agent = request_data.get("user_agent", "")
     query_string = request_data.get("query_string", "")
 
-    # Neutralize path name and user agent to eliminate proxy variable bias and training-serving skew.
-    # This ensures the model classifies based on payload content and query string presence/length
-    # rather than specific directory/path names or client software footprints.
-    neutral_path = "/api/data"
-    neutral_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-
-    full_url = neutral_path + ("?" + query_string if query_string else "")
+    full_url = path + ("?" + query_string if query_string else "")
     url_length = float(len(full_url))
     payload_length = float(len(payload))
 
@@ -86,9 +79,9 @@ def extract_features(request_data: dict) -> list:
     non_alphanum_ratio = float(non_alphanum) / len(payload) if payload else 0.0
 
     url_encoded_count = float(len(re.findall(r'%[0-9A-Fa-f]{2}', combined_text)))
-    path_depth = float(neutral_path.count('/'))
+    path_depth = float(path.count('/'))
     method_is_post = 1.0 if method.upper() == "POST" else 0.0
-    user_agent_length = float(len(neutral_ua))
+    user_agent_length = float(len(user_agent))
 
     return [
         url_length,
