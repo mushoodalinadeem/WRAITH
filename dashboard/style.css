@@ -9,7 +9,7 @@
   /* Core palette */
   --blue:         #0ea5e9;
   --blue-dim:     #0284c7;
-  --blue-dark:    #070e1b;
+  --blue-dark:    #0c4a6e;
   --blue-glow:    rgba(14,165,233,0.18);
   --blue-border:  rgba(14,165,233,0.35);
 
@@ -38,9 +38,9 @@
   --c-buf:   #facc15;
 
   /* Text */
-  --text:      #38bdf8;
-  --text-dim:  rgba(56,189,248,0.7);
-  --text-muted:rgba(56,189,248,0.45);
+  --text:      #f0f9ff;
+  --text-dim:  #bae6fd;
+  --text-muted:#38bdf8;
 
   /* Misc */
   --border:   rgba(14,165,233,0.3);
@@ -228,7 +228,7 @@ button{font-family:var(--font-mono);}
 .threat-ring{
   position:absolute;width:160px;height:160px;
   top:50%;left:50%;transform:translate(-50%,-22px);
-  opacity:0.18;pointer-events:none;
+  opacity:0.5;pointer-events:none;
 }
 .ring-bg{fill:none;stroke:var(--blue-dark);stroke-width:8;}
 .ring-fg{

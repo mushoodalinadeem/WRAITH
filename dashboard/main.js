@@ -184,8 +184,8 @@ const _Chart = (() => {
     const ctx = document.getElementById('attack-chart');
     if (!ctx || !window.Chart) return;
 
-    Chart.defaults.color = 'rgba(14,165,233,0.35)';
-    Chart.defaults.borderColor = 'rgba(14,165,233,0.08)';
+    Chart.defaults.color = '#38bdf8';
+    Chart.defaults.borderColor = 'rgba(14,165,233,0.18)';
 
     // Pre-populate buckets for the last 10 minutes
     const nowMs = Date.now();
@@ -215,7 +215,7 @@ const _Chart = (() => {
             display: true,
             position: 'top',
             labels: {
-              color: 'rgba(14,165,233,0.5)',
+              color: '#bae6fd',
               font:  { family: "'Share Tech Mono', monospace", size: 10 },
               boxWidth: 12,
               padding: 14,
@@ -230,24 +230,24 @@ const _Chart = (() => {
             borderColor: 'rgba(14,165,233,0.3)',
             borderWidth: 1,
             titleColor: '#0ea5e9',
-            bodyColor: 'rgba(14,165,233,0.7)',
+            bodyColor: '#f0f9ff',
             titleFont: { family: "'Share Tech Mono', monospace", size: 11 },
             bodyFont:  { family: "'Share Tech Mono', monospace", size: 10 },
           }
         },
         scales: {
           x: {
-            grid: { color: 'rgba(14,165,233,0.06)' },
+            grid: { color: 'rgba(14,165,233,0.12)' },
             ticks: {
-              color: 'rgba(14,165,233,0.35)',
+              color: '#38bdf8',
               font: { family: "'Share Tech Mono', monospace", size: 9 },
               maxTicksLimit: 8,
             }
           },
           y: {
-            grid: { color: 'rgba(14,165,233,0.06)' },
+            grid: { color: 'rgba(14,165,233,0.12)' },
             ticks: {
-              color: 'rgba(14,165,233,0.35)',
+              color: '#38bdf8',
               font: { family: "'Share Tech Mono', monospace", size: 9 },
               stepSize: 1,
             },
