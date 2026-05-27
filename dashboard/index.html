@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WRAITH — Honeypot Monitor</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- Scanline + vignette overlays -->
+  <div class="scanlines" aria-hidden="true"></div>
+  <div class="vignette"  aria-hidden="true"></div>
+
+  <!-- ═══════════════════════════ HEADER ═══════════════════════════ -->
+  <header class="hdr">
+    <div class="hdr-left">
+      <span class="hdr-logo">[ WRAITH ]</span>
+      <span class="hdr-sub">INTELLIGENT HTTP HONEYPOT v1.0</span>
+    </div>
+
+    <!-- Quick stats always visible in header -->
+    <div class="hdr-stats">
+      <div class="hdr-stat">
+        <span class="hdr-stat-val" id="h-total">0</span>
+        <span class="hdr-stat-key">REQUESTS</span>
+      </div>
+      <div class="hdr-divider"></div>
+      <div class="hdr-stat">
+        <span class="hdr-stat-val" id="h-attacks">0</span>
+        <span class="hdr-stat-key">ATTACKS</span>
+      </div>
+      <div class="hdr-divider"></div>
+      <div class="hdr-stat">
+        <span class="hdr-stat-val" id="h-ml">0</span>
+        <span class="hdr-stat-key">ML HITS</span>
+      </div>
+      <div class="hdr-divider"></div>
+      <div class="hdr-stat">
+        <span class="hdr-stat-val" id="h-rule">0</span>
+        <span class="hdr-stat-key">RULE HITS</span>
+      </div>
+      <div class="hdr-divider"></div>
+      <div class="hdr-stat">
+        <span class="hdr-stat-val" id="h-fallback">0</span>
+        <span class="hdr-stat-key">FALLBACK HITS</span>
+      </div>
+    </div>
+
+    <div class="hdr-right">
+      <span class="blink-dot"></span>
+      <span class="hdr-time-label">SYSTEM TIME</span>
+      <span id="sys-time" class="hdr-time">--:--:--</span>
+      <span id="conn-status" class="badge badge--warn">◌ CONNECTING</span>
+    </div>
+  </header>
+
+  <!-- ══════════════════════════ MAIN GRID ════════════════════════ -->
+  <main class="grid">
+
+    <!-- ── THREAT SCORE (left column, spans 2 rows) ── -->
+    <section class="panel panel--threat" id="threat-panel">
+      <div class="panel-title">▸ THREAT LEVEL</div>
+
+      <div class="threat-core">
+        <div class="threat-state-label" id="threat-label">NORMAL</div>
+
+        <div class="threat-score-wrap">
+          <span class="threat-score" id="threat-score">000</span>
+          <span class="threat-unit">/100</span>
+        </div>
+
+        <!-- Circular gauge ring -->
+        <svg class="threat-ring" viewBox="0 0 120 120">
+          <circle class="ring-bg" cx="60" cy="60" r="52"/>
+          <circle class="ring-fg" id="ring-fg" cx="60" cy="60" r="52"
+                  stroke-dasharray="326.7" stroke-dashoffset="326.7"/>
+        </svg>
+
+        <div class="threat-bar-wrap">
+          <div class="threat-bar" id="threat-bar"></div>
+        </div>
+        <div class="threat-ticks">
+          <span>0</span><span>WARN 40</span><span>ALERT 70</span><span>100</span>
+        </div>
+
+        <div class="threat-last" id="threat-last">
+          LAST ATTACK: <span id="last-attack-ts">—</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── ATTACK TIMELINE CHART ── -->
+    <section class="panel panel--chart">
+      <div class="panel-title">
+        ▸ ATTACK TIMELINE
+        <span class="panel-sub">30-second buckets</span>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="attack-chart"></canvas>
+      </div>
+    </section>
+
+    <!-- ── ATTACK TAXONOMY ── -->
+    <section class="panel panel--breakdown">
+      <div class="panel-title">▸ ATTACK TAXONOMY</div>
+      <div class="breakdown-list">
+
+        <div class="bk-row">
+          <span class="bk-chip bk-chip--sql">SQL</span>
+          <span class="bk-bar-wrap"><span class="bk-bar" id="bk-sql"></span></span>
+          <span class="bk-cnt" id="cnt-sql">0</span>
+        </div>
+        <div class="bk-row">
+          <span class="bk-chip bk-chip--xss">XSS</span>
+          <span class="bk-bar-wrap"><span class="bk-bar" id="bk-xss"></span></span>
+          <span class="bk-cnt" id="cnt-xss">0</span>
+        </div>
+        <div class="bk-row">
+          <span class="bk-chip bk-chip--flood">FLOOD</span>
+          <span class="bk-bar-wrap"><span class="bk-bar" id="bk-flood"></span></span>
+          <span class="bk-cnt" id="cnt-flood">0</span>
+        </div>
+        <div class="bk-row">
+          <span class="bk-chip bk-chip--brute">BRUTE</span>
+          <span class="bk-bar-wrap"><span class="bk-bar" id="bk-brute"></span></span>
+          <span class="bk-cnt" id="cnt-brute">0</span>
+        </div>
+        <div class="bk-row">
+          <span class="bk-chip bk-chip--enum">ENUM</span>
+          <span class="bk-bar-wrap"><span class="bk-bar" id="bk-enum"></span></span>
+          <span class="bk-cnt" id="cnt-enum">0</span>
+        </div>
+        <div class="bk-row">
+          <span class="bk-chip bk-chip--file">FILE</span>
+          <span class="bk-bar-wrap"><span class="bk-bar" id="bk-file"></span></span>
+          <span class="bk-cnt" id="cnt-file">0</span>
+        </div>
+        <div class="bk-row">
+          <span class="bk-chip bk-chip--crlf">CRLF</span>
+          <span class="bk-bar-wrap"><span class="bk-bar" id="bk-crlf"></span></span>
+          <span class="bk-cnt" id="cnt-crlf">0</span>
+        </div>
+        <div class="bk-row">
+          <span class="bk-chip bk-chip--buf">BUF</span>
+          <span class="bk-bar-wrap"><span class="bk-bar" id="bk-buf"></span></span>
+          <span class="bk-cnt" id="cnt-buf">0</span>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ── LIVE TERMINAL ── -->
+    <section class="panel panel--terminal">
+      <div class="panel-title">
+        ▸ LIVE INTERCEPT FEED
+        <span class="panel-actions">
+          <button class="btn-sm" onclick="pauseTerminal()">PAUSE</button>
+          <button class="btn-sm" onclick="clearTerminal()">CLEAR</button>
+        </span>
+      </div>
+      <div class="terminal" id="terminal">
+        <div class="t-line t-line--sys">
+          <span class="t-ts">SYSTEM</span>
+          <span class="t-body">WRAITH honeypot online. Awaiting intrusion attempts...</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── INTRUSION LOG TABLE ── -->
+    <section class="panel panel--table">
+      <div class="panel-title">
+        ▸ INTRUSION LOG
+        <span class="panel-actions">
+          <button class="btn-sm btn-sim" onclick="simulateAttack()">⚡ SIMULATE ATTACK</button>
+        </span>
+      </div>
+      <div class="table-scroll">
+        <table class="log-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>TIMESTAMP</th>
+              <th>SOURCE IP</th>
+              <th>METHOD</th>
+              <th>PATH</th>
+              <th>ATTACK TYPE</th>
+              <th>SCORE</th>
+              <th>LAYER</th>
+            </tr>
+          </thead>
+          <tbody id="log-tbody">
+            <tr class="empty-row">
+              <td colspan="8">[ NO INTRUSIONS RECORDED — SYSTEM MONITORING ]</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── FORENSIC DETAIL ── -->
+    <section class="panel panel--forensic">
+      <div class="panel-title">
+        ▸ FORENSIC ANALYSIS
+        <span id="forensic-id" class="forensic-id-tag"></span>
+      </div>
+      <div id="forensic-content" class="forensic-empty">
+        [ SELECT A LOG ENTRY TO VIEW FULL FORENSIC DETAIL ]
+      </div>
+    </section>
+
+  </main>
+
+  <script src="main.js"></script>
+</body>
+</html>

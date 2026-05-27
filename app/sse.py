@@ -43,7 +43,7 @@ def get_logs_since(last_id: int, db_path: str) -> list:
                    headers, payload, user_agent, attack_type, 
                    threat_score, confidence, layer, report
             FROM logs
-            WHERE id > ?
+            WHERE id > ? AND is_simulation = 0
             ORDER BY id ASC
             LIMIT ?
             """,
@@ -118,11 +118,15 @@ def stream():
     Returns a streaming Response — connection stays open indefinitely.
     """
     db_path = current_app.config["DATABASE_PATH"]
+    since_id = request.args.get("since_id", None, type=int)
     last_event_id = request.headers.get("Last-Event-ID", "0")
     try:
         last_event_id = int(last_event_id)
     except (ValueError, TypeError):
         last_event_id = 0
+
+    if since_id is not None:
+        last_event_id = since_id
 
     return Response(
         _event_stream(db_path, last_event_id),

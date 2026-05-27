@@ -31,7 +31,7 @@ def get_logs():
     try:
         conn = get_db_connection(config.DATABASE_PATH)
         logs = conn.execute(
-            "SELECT id, timestamp, ip_address, method, path, attack_type, threat_score, layer FROM logs WHERE id > ? ORDER BY id DESC LIMIT ?", 
+            "SELECT id, timestamp, ip_address, method, path, attack_type, threat_score, layer FROM logs WHERE id > ? AND is_simulation = 0 ORDER BY id DESC LIMIT ?", 
             (since_id, limit)
         ).fetchall()
         
@@ -109,18 +109,21 @@ def get_stats():
     try:
         conn = get_db_connection(config.DATABASE_PATH)
         
-        total_requests = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0] or 0
-        total_attacks = conn.execute("SELECT COUNT(*) FROM logs WHERE attack_type != 'Normal'").fetchone()[0] or 0
+        total_requests = conn.execute("SELECT COUNT(*) FROM logs WHERE is_simulation = 0").fetchone()[0] or 0
+        total_attacks = conn.execute("SELECT COUNT(*) FROM logs WHERE attack_type != 'Normal' AND is_simulation = 0").fetchone()[0] or 0
+        ml_hits = conn.execute("SELECT COUNT(*) FROM logs WHERE layer = 'ml' AND is_simulation = 0").fetchone()[0] or 0
+        rule_hits = conn.execute("SELECT COUNT(*) FROM logs WHERE layer = 'rule' AND is_simulation = 0").fetchone()[0] or 0
+        fallback_hits = conn.execute("SELECT COUNT(*) FROM logs WHERE layer = 'fallback' AND is_simulation = 0").fetchone()[0] or 0
         
         attack_counts = conn.execute(
-            "SELECT attack_type, COUNT(*) as count FROM logs WHERE attack_type != 'Normal' GROUP BY attack_type"
+            "SELECT attack_type, COUNT(*) as count FROM logs WHERE attack_type != 'Normal' AND is_simulation = 0 GROUP BY attack_type"
         ).fetchall()
         
         attacks_by_type = {row["attack_type"]: row["count"] for row in attack_counts}
         
         # Threat level logic using rolling 5-minute window
         cursor = conn.execute(
-            "SELECT MAX(threat_score) FROM logs WHERE timestamp > datetime('now', '-5 minutes')"
+            "SELECT MAX(threat_score) FROM logs WHERE timestamp > datetime('now', '-5 minutes') AND is_simulation = 0"
         )
         max_score = cursor.fetchone()[0] or 0
 
@@ -137,7 +140,11 @@ def get_stats():
                 "total_requests": total_requests,
                 "total_attacks": total_attacks,
                 "attacks_by_type": attacks_by_type,
-                "current_threat_level": level
+                "current_threat_level": level,
+                "max_score": max_score,
+                "ml_hits": ml_hits,
+                "rule_hits": rule_hits,
+                "fallback_hits": fallback_hits
             }
         }), 200
     except Exception as e:

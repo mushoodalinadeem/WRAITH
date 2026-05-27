@@ -60,6 +60,11 @@ def init_db(db_path: str) -> None:
         """)
 
         cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_logs_layer
+            ON logs (layer)
+        """)
+
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_timestamp
             ON logs (timestamp)
         """)
