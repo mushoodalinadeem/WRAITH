@@ -1,0 +1,24 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Data and model (too large, sensitive)
+data/
+ml/data/
+
+# Development
+.env
+.git/
+.gitignore
+*.md
+
+# IDE
+.vscode/
+.idea/
+
+# Test files
+scratch/
