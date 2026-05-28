@@ -237,17 +237,17 @@ const _Chart = (() => {
         },
         scales: {
           x: {
-            grid: { color: 'rgba(14,165,233,0.12)' },
+            grid: { color: 'rgba(14,165,233,0.06)' },
             ticks: {
-              color: '#38bdf8',
+              color: 'rgba(14,165,233,0.35)',
               font: { family: "'Share Tech Mono', monospace", size: 9 },
               maxTicksLimit: 8,
             }
           },
           y: {
-            grid: { color: 'rgba(14,165,233,0.12)' },
+            grid: { color: 'rgba(14,165,233,0.06)' },
             ticks: {
-              color: '#38bdf8',
+              color: 'rgba(14,165,233,0.35)',
               font: { family: "'Share Tech Mono', monospace", size: 9 },
               stepSize: 1,
             },

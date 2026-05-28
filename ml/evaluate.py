@@ -3,18 +3,6 @@ ml/evaluate.py — Full evaluation of the trained WRAITH Random Forest model.
 
 Loads model.pkl, recreates the identical test split from training,
 and produces a complete forensic performance report.
-
-Usage:
-    cd ~/Documants/WRAITH
-    source venv/bin/activate
-    python3 ml/evaluate.py
-
-Output:
-    - Overall accuracy
-    - Per-class precision, recall, F1-scorce, support
-    - Confusion matrix with class name lables
-    - Feature importance ranking
-    - Per-class confidence distribution
 """
 
 import os
@@ -43,9 +31,6 @@ def _load_model() -> tuple:
     """
     Load trained model and LabelEncoder from model.pkl.
     Exits with clear message if model not found.
-
-    Returns:
-        (RandomForestClassifier, LabelEncoder)
     """
     if not os.path.exists(config.MODEL_PATH):
         print(f"[EVAL] model.pkl not found at {config.MODEL_PATH}")
@@ -59,17 +44,9 @@ def _load_model() -> tuple:
     print(f"[EVAL] Classes: {saved['classes']}\n")
     return saved["model"], saved["label_encoder"]
 
+
 def _get_test_data(le) -> tuple:
-    """
-    Recreate the exact test split used during training.
-    Identical random_state=42 + stratify=y produces the same split.
-
-    Args:
-        le: Fitted LabelEncoder from model.pkl
-
-    Returns:
-        (X_test: np.ndarray, y_test: np.ndarray)
-    """
+    """Recreate the exact test split used during training with absolute state matching."""
     print("[EVAL] Recreating test split from datasets...")
     data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
     csic_path = os.path.join(data_dir, "csic_database.csv")
@@ -79,6 +56,7 @@ def _get_test_data(le) -> tuple:
     df_csic = _load_csic(csic_path)
     df_payload = _load_payloads(payload_train, payload_test)
     df = pd.concat([df_csic, df_payload], ignore_index=True).dropna()
+    
     known_labels = set(le.classes_)
     df = df[df["attack_type"].isin(known_labels)]
 
@@ -93,11 +71,7 @@ def _get_test_data(le) -> tuple:
 
 
 def _print_confusion_matrix(cm: np.ndarray, class_names: list) -> None:
-    """
-    print confusion matrix as a formatted table.
-    Rows = actual class, Columns = predicted class.
-    Diagonal = correct predictions.
-    """
+    """Print confusion matrix as a formatted table with structural markers."""
     col_width = max(len(name) for name in class_names) + 2
 
     print(" predicted →")
@@ -116,46 +90,61 @@ def _print_confusion_matrix(cm: np.ndarray, class_names: list) -> None:
     print()
 
 
-def _analyze_confidence(model, X_test: np.ndarray,
-                        y_test: np.ndarray, class_names: list) -> None:
+def _analyze_confidence(model, X_test: np.ndarray, y_test: np.ndarray, 
+                        y_proba: np.ndarray, class_names: list) -> None:
     """
-    Show average, min, max confidence per predicted class.
-    Flags classes below ML_CONFIDENCE_THRESHOLD — those will be 
-    silently passed to the fallback layer in production.
+    Show average, min, and max confidence distributions per predicted class.
+    Protects index lookups against column order modifications dynamically.
     """
-    probas = model.predict_proba(X_test)
-    Y_pred = model.classes_[probas.argmax(axis=1)]
+    y_pred_encoded = model.classes_[y_proba.argmax(axis=1)]
     threshold = config.ML_CONFIDENCE_THRESHOLD
 
-    print("[EVAL] === Confidence Distribution per Class ===")
+    print("[EVAL] === Confidence Distribution Analysis ===")
     print(f"[EVAL] ML_CONFIDENCE_THRESHOLD = {threshold}")
     print(f"[EVAL] Predictions below {threshold:.0%} are passed to fallback layer\n")
 
     for i, name in enumerate(class_names):
         class_idx = model.classes_[i]
-        mask = (Y_pred == class_idx)
+        
+        # Safe Resolution: Locate the precise column position matching the target class
+        col_idx = np.where(model.classes_ == class_idx)[0][0]
+        
+        mask = (y_pred_encoded == class_idx)
+        actual_support = (y_test == class_idx).sum()
+        
         if mask.sum() == 0:
-            print(f"  {name:<22} No predictions made")
+            print(f"  {name:<22} (Support: {actual_support}) No predictions made")
+            print("-" * 60)
             continue
+
         correct_mask = (y_test[mask] == class_idx)
-        avg_conf = probas[mask, i].mean()
-        min_conf = probas[mask, i].min()
-        max_conf = probas[mask, i].max()
+        correct_count = correct_mask.sum()
+        precision = correct_count / mask.sum()
+
+        confidences = y_proba[mask, col_idx]
+        avg_conf = confidences.mean()
+        min_conf = confidences.min()
+        max_conf = confidences.max()
+
+        # Isolate boundary behavior profiles to track system calibration
+        conf_correct = confidences[correct_mask]
+        conf_incorrect = confidences[~correct_mask]
+        avg_conf_correct = conf_correct.mean() if len(conf_correct) > 0 else 0.0
+        avg_conf_incorrect = conf_incorrect.mean() if len(conf_incorrect) > 0 else 0.0
+
         flag = " ⚠ avg below threshold" if avg_conf < threshold else ""
-        print(
-            f"  {name:<22} "
-            f"avg={avg_conf:.3f}  "
-            f"min={min_conf:.3f}  "
-            f"max={max_conf:.3f}"
-            f"{flag}"
-        )
+        print(f"  {name:<22} (Support: {actual_support} samples)")
+        print(f"    Total Predictions   : {mask.sum()} ({correct_count} correct, {mask.sum() - correct_count} incorrect)")
+        print(f"    Precision on Class  : {precision:.2%}")
+        print(f"    Avg Conf (Overall)  : {avg_conf:.3f} (min={min_conf:.3f}, max={max_conf:.3f}){flag}")
+        print(f"    Avg Conf (Correct)  : {avg_conf_correct:.3f}")
+        print(f"    Avg Conf (Incorrect): {avg_conf_incorrect:.3f}")
+        print("-" * 60)
     print()
 
 
-def evaluate() -> None:
-    """
-    Full evaluation pipeline. Prints complete performance report.
-    """
+def evaluate() -> float:
+    """Full evaluation pipeline. Prints complete performance report."""
     print("\n" + "=" * 60)
     print("  WRAITH — ML Model Evaluation Report")
     print("=" * 60 + "\n")
@@ -166,6 +155,8 @@ def evaluate() -> None:
     X_test, y_test = _get_test_data(le)
 
     y_pred = model.predict(X_test)
+    
+    # Optimized Execution: Compute array spaces exactly once
     y_proba = model.predict_proba(X_test)
 
     accuracy = accuracy_score(y_test, y_pred)
@@ -188,11 +179,11 @@ def evaluate() -> None:
         zip(FEATURE_NAMES, importances),
         key=lambda x: x[1], reverse=True
     ):
-        bar = "█" * int(imp *50)
-        print(f" {name:<22} {imp:.4f} {bar}")
-        print()
+        bar = "█" * int(imp * 50)
+        print(f"  {name:<22} {imp:.4f} {bar}")
 
-    _analyze_confidence(model, X_test, y_test, class_names)
+    print()
+    _analyze_confidence(model, X_test, y_test, y_proba, class_names)
 
     print("[EVAL] === Summary ===")
     report = classification_report(
@@ -209,6 +200,8 @@ def evaluate() -> None:
     print(f" Test samples: {len(X_test)}")
     print(f" Classes: {len(class_names)}")
     print("\n" + "=" * 60 + "\n")
+    
+    return float(accuracy)
 
 
 if __name__ == "__main__":
