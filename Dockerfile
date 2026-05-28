@@ -12,6 +12,8 @@ RUN useradd -m -s /bin/bash wraith && \
     mkdir -p /app/data /app/ml && \
     chown -R wraith:wraith /app/data /app/ml
 
+VOLUME ["/app/data"]
+
 USER wraith
 
 EXPOSE 5000
