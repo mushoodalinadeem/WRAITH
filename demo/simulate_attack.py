@@ -8,37 +8,44 @@ Usage:
     # Default (local server)
     python3 demo/simulate_attack.py
 
-    # Custom URL (ngrok or Docker)
-    python3 demo/simulate_attack.py --url https://abc.ngrok.io
-
-    # Single phase only
-    python3 demo/simulate_attack.py --phase flood
+    # Custom URL (Docker or remote tunnel)
+    python3 demo/simulate_attack.py --url http://127.0.0.1:5000
 
 Exhibition sequence:
-    Phase 1 — Normal baseline (establishes green state)
-    Phase 2 — SQL Injection (ML + fallback layer)
-    Phase 3 — XSS (ML layer)
-    Phase 4 — HTTP Flood (rule layer — 30 req burst)
-    Phase 5 — Web Brute Force (rule layer — 5 login attempts)
-    Phase 6 — Dir Enumeration (rule layer — 10 unique paths)
-    Phase 7 — File Disclosure (ML + fallback layer)
-    Phase 8 — Buffer Overflow (ML + fallback layer — payload > 5000 chars)
-    Phase 9 — CRLF Injection (fallback layer)
+    Phase 1/9 — Normal baseline (establishes baseline blue state)
+    Phase 2/9 — SQL Injection (ML + fallback layer)
+    Phase 3/9 — XSS (ML layer)
+    Phase 4/9 — HTTP Flood (Concurrent rule layer — 30 parallel requests)
+    Phase 5/9 — Web Brute Force (Rule layer — 5 login attempts)
+    Phase 6/9 — Directory Enumeration (Rule layer — 10 unique paths)
+    Phase 7/9 — File Disclosure (ML + fallback layer)
+    Phase 8/9 — Buffer Overflow (ML + fallback layer — payload > 5000 chars)
+    Phase 9/9 — CRLF Injection (Fallback layer)
 """
 
 import requests
 import time
 import sys
 import argparse
+import threading
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 BASE_URL = "http://127.0.0.1:5000"
 DELAY_SHORT = 0.3
 DELAY_LONG = 2.5
 
+# Thread lock to guarantee pristine, non-interleaved terminal log printing
+_stdout_lock = threading.Lock()
+# Thread-safe event to signal connection failure across worker threads
+_exit_flag = threading.Event()
+
 def send(method: str, path: str, payload: dict = None,
          headers: dict = None, label: str = "") -> None:
-    """Send a single HTTP request and print a timestamped result line."""
+    """Send a single HTTP request and print a synchronized timestamped result line."""
+    if _exit_flag.is_set():
+        return
+
     url = BASE_URL + path
     default_headers = {
         "User-Agent": "Mozilla/5.0 (WRAITH-DEMO/1.0)",
@@ -49,26 +56,33 @@ def send(method: str, path: str, payload: dict = None,
 
     try:
         if method.upper() == "POST":
-            resp = requests.post(url, json=payload,
-                                 headers=default_headers, timeout=5)
+            resp = requests.post(url, json=payload, headers=default_headers, timeout=5)
         else:
             resp = requests.get(url, headers=default_headers, timeout=5)
 
         ts = datetime.now().strftime("%H:%M:%S")
         status = "✓" if resp.status_code < 500 else "x"
-        print(f"  [{ts}] {status} {method:<5} {path:<35} → {label}")
+        
+        with _stdout_lock:
+            # Double check flag to prevent prints after connection failure
+            if not _exit_flag.is_set():
+                print(f"   [{ts}] {status} {method:<5} {path:<35} → {label}")
 
     except requests.exceptions.ConnectionError:
-        print(f"\n  [FATAL] Cannot connect to {BASE_URL}")
-        print(f"          Start the server: python3 main.py")
-        sys.exit(1)
+        with _stdout_lock:
+            if not _exit_flag.is_set():
+                print(f"\n   [FATAL] Cannot connect to {BASE_URL}")
+                print(f"           Start the server or specify --url path parameter.")
+                _exit_flag.set()
     except Exception as e:
-        print(f"  [ERROR] {e}")
+        with _stdout_lock:
+            if not _exit_flag.is_set():
+                print(f"   [ERROR] {e}")
 
 def phase_normal():
     print("\n" + "=" * 60)
-    print("[PHASE 1/8] Normal Baseline Traffic")
-    print("  Dashboard should show: NORMAL (blue, score 000)")
+    print("[PHASE 1/9] Normal Baseline Traffic")
+    print("   Dashboard should show: NORMAL (sky-blue, score 000)")
     print("=" * 60)
     endpoints = [
         ("GET", "/api/search", None),
@@ -79,13 +93,17 @@ def phase_normal():
     ]
     for method, path, payload in endpoints:
         send(method, path, payload, label="Normal traffic")
+        if _exit_flag.is_set():
+            return
         time.sleep(DELAY_SHORT)
     time.sleep(DELAY_LONG)
 
 def phase_sqli():
+    if _exit_flag.is_set():
+        return
     print("\n" + "=" * 60)
-    print("[PHASE 2/8] SQL Injection Attack")
-    print("  Expected: SQL Injection | Layer: ML or FALLBACK | Score: 78-95")
+    print("[PHASE 2/9] SQL Injection Attack")
+    print("   Expected: SQL Injection | Layer: ML or FALLBACK | Score: 78-95")
     print("=" * 60)
     payloads = [
         {"id": "1 UNION SELECT username,password FROM users --"},
@@ -97,13 +115,17 @@ def phase_sqli():
     for p in payloads:
         send("POST", "/api/users", p, label="SQL Injection")
         send("POST", "/admin/login", p, label="SQL Injection")
+        if _exit_flag.is_set():
+            return
         time.sleep(DELAY_SHORT)
     time.sleep(DELAY_LONG)
 
 def phase_xss():
+    if _exit_flag.is_set():
+        return
     print("\n" + "=" * 60)
-    print("[PHASE 3/8] XSS Attack")
-    print("  Expected: XSS | Layer: ML or FALLBACK | Score: 78-95")
+    print("[PHASE 3/9] XSS Attack")
+    print("   Expected: XSS | Layer: ML or FALLBACK | Score: 78-95")
     print("=" * 60)
     payloads = [
         {"comment": "<script>alert('XSS')</script>"},
@@ -113,30 +135,40 @@ def phase_xss():
     ]
     for p in payloads:
         send("POST", "/api/search", p, label="XSS")
-        send("GET", "/api/users?q=<script>alert(1)</script>", label="XSS probe")
+        send("GET", "/api/users?q=%3Cscript%3Ealert(1)%3C/script%3E", label="XSS probe")
+        if _exit_flag.is_set():
+            return
         time.sleep(DELAY_SHORT)
     time.sleep(DELAY_LONG)
 
 def phase_flood():
+    if _exit_flag.is_set():
+        return
     print("\n" + "=" * 60)
-    print("[PHASE 4/8] HTTP Flood Attack")
-    print("  Expected: HTTP Flood | Layer: RULE | Score: 95")
-    print("  Sending 30 rapid requests — rule fires at 20 req/s")
+    print("[PHASE 4/9] HTTP Flood Attack")
+    print("   Expected: HTTP Flood | Layer: RULE | Score: 95")
+    print("   Firing 30 parallel requests concurrently via ThreadPoolExecutor...")
     print("=" * 60)
-    flood_headers = {"User-Agent": "DDoS-Bot/2.0 (Flood)"}
-    # No delay between requests to trigger the flood rule (threshold is 20 req/sec)
-    for i in range(30):
-        send("GET", "/api/users",
-             headers=flood_headers,
-             label=f"Flood {i+1}/30")
+    flood_headers = {"User-Agent": "DDoS-Bot/2.0 (Flood-Burst)"}
     
+    with ThreadPoolExecutor(max_workers=30) as executor:
+        futures = [
+            executor.submit(send, "GET", "/api/users", None, flood_headers, f"Flood Burst {i+1}/30")
+            for i in range(30)
+        ]
+        for _ in as_completed(futures):
+            if _exit_flag.is_set():
+                break
+            
     time.sleep(DELAY_LONG)
 
 def phase_bruteforce():
+    if _exit_flag.is_set():
+        return
     print("\n" + "=" * 60)
-    print("[PHASE 5/8] Web Brute Force Attack")
-    print("  Expected: Web Brute Force | Layer: RULE | Score: 95")
-    print("  Sending 5 POST /admin/login — rule fires at 3 attempts in 2 min")
+    print("[PHASE 5/9] Web Brute Force Attack")
+    print("   Expected: Web Brute Force | Layer: RULE | Score: 95")
+    print("   Sending 5 POST /admin/login — rule fires at 3 attempts in 2 min")
     print("=" * 60)
     credentials = [
         {"username": "admin", "password": "password123"},
@@ -146,15 +178,19 @@ def phase_bruteforce():
         {"username": "superuser", "password": "super123"},
     ]
     for creds in credentials:
-        send("POST", "/admin/login", creds, label="Brute Force")
-        time.sleep(0.5)
+        send("POST", "/admin/login", creds, label="Brute Force attempt")
+        if _exit_flag.is_set():
+            return
+        time.sleep(0.4)
     time.sleep(DELAY_LONG)
 
 def phase_enumeration():
+    if _exit_flag.is_set():
+        return
     print("\n" + "=" * 60)
-    print("[PHASE 6/8] Directory Enumeration Attack")
-    print("  Expected: Directory Enumeration | Layer: RULE | Score: 95")
-    print("  Probing 10 unique unknown paths — rule fires at 5 in 60s")
+    print("[PHASE 6/9] Directory Enumeration Attack")
+    print("   Expected: Directory Enumeration | Layer: RULE | Score: 95")
+    print("   Probing 10 unique unknown paths — rule fires at 5 in 60s")
     print("=" * 60)
     paths = [
         "/.env",         "/wp-admin",        "/phpmyadmin",
@@ -163,14 +199,18 @@ def phase_enumeration():
         "/etc/passwd",
     ]
     for path in paths:
-        send("GET", path, label="Dir Enumeration")
+        send("GET", path, label="Directory Probe")
+        if _exit_flag.is_set():
+            return
         time.sleep(DELAY_SHORT)
     time.sleep(DELAY_LONG)
 
 def phase_file_disclosure():
+    if _exit_flag.is_set():
+        return
     print("\n" + "=" * 60)
     print("[PHASE 7/9] File Disclosure Attack")
-    print("  Expected: File Disclosure | Layer: ML or FALLBACK | Score: 80-92")
+    print("   Expected: File Disclosure | Layer: ML or FALLBACK | Score: 80-92")
     print("=" * 60)
     payloads = [
         {"path": "../../../etc/passwd"},
@@ -181,22 +221,28 @@ def phase_file_disclosure():
     for p in payloads:
         send("POST", "/api/admin/export", p, label="File Disclosure")
         send("GET", "/backup?file=../../etc/passwd", label="File Disclosure")
+        if _exit_flag.is_set():
+            return
         time.sleep(DELAY_SHORT)
     time.sleep(DELAY_LONG)
 
 def phase_buffer_overflow():
+    if _exit_flag.is_set():
+        return
     print("\n" + "=" * 60)
     print("[PHASE 8/9] Buffer Overflow Attack")
-    print("  Expected: Buffer Overflow | Layer: FALLBACK or ML | Score: 75-78")
+    print("   Expected: Buffer Overflow | Layer: FALLBACK or ML | Score: 75-78")
     print("=" * 60)
     huge_payload = {"data": "A" * 5100}
-    send("POST", "/api/users", huge_payload, label="Buffer Overflow")
+    send("POST", "/api/users", huge_payload, label="Buffer Overflow string")
     time.sleep(DELAY_LONG)
 
 def phase_crlf():
+    if _exit_flag.is_set():
+        return
     print("\n" + "=" * 60)
     print("[PHASE 9/9] CRLF Injection Attack")
-    print("  Expected: CRLF Injection | Layer: FALLBACK | Score: 78")
+    print("   Expected: CRLF Injection | Layer: FALLBACK | Score: 78")
     print("=" * 60)
     payloads = [
         {"input": "test%0d%0aSet-Cookie:session=hacked"},
@@ -206,6 +252,8 @@ def phase_crlf():
     for p in payloads:
         send("POST", "/api/users", p, label="CRLF Injection")
         send("GET", "/api/search",  label="CRLF probe")
+        if _exit_flag.is_set():
+            return
         time.sleep(DELAY_SHORT)
     time.sleep(DELAY_LONG)
 
@@ -260,14 +308,18 @@ def main():
         print("  [✓] Server reachable. Starting simulation...\n")
     except Exception:
         print(f"  [x] Cannot reach {BASE_URL}")
-        print(f"      Start server: python3 main.py")
+        print(f"      Verify honeypot instance availability parameters.")
         sys.exit(1)
 
     if args.phase == "all":
         for phase_fn in PHASES.values():
             phase_fn()
+            if _exit_flag.is_set():
+                sys.exit(1)
     else:
         PHASES[args.phase]()
+        if _exit_flag.is_set():
+            sys.exit(1)
 
     print("\n" + "=" * 60)
     print("  SIMULATION COMPLETE")
