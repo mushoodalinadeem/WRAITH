@@ -22,7 +22,8 @@ Exhibition sequence:
     Phase 5 — Web Brute Force (rule layer — 5 login attempts)
     Phase 6 — Dir Enumeration (rule layer — 10 unique paths)
     Phase 7 — File Disclosure (ML + fallback layer)
-    Phase 8 — CRLF Injection (fallback layer)
+    Phase 8 — Buffer Overflow (ML + fallback layer — payload > 5000 chars)
+    Phase 9 — CRLF Injection (fallback layer)
 """
 
 import requests
@@ -168,7 +169,7 @@ def phase_enumeration():
 
 def phase_file_disclosure():
     print("\n" + "=" * 60)
-    print("[PHASE 7/8] File Disclosure Attack")
+    print("[PHASE 7/9] File Disclosure Attack")
     print("  Expected: File Disclosure | Layer: ML or FALLBACK | Score: 80-92")
     print("=" * 60)
     payloads = [
@@ -179,13 +180,22 @@ def phase_file_disclosure():
     ]
     for p in payloads:
         send("POST", "/api/admin/export", p, label="File Disclosure")
-        send("GET", "/backup",               label="File Disclosure")
+        send("GET", "/backup?file=../../etc/passwd", label="File Disclosure")
         time.sleep(DELAY_SHORT)
+    time.sleep(DELAY_LONG)
+
+def phase_buffer_overflow():
+    print("\n" + "=" * 60)
+    print("[PHASE 8/9] Buffer Overflow Attack")
+    print("  Expected: Buffer Overflow | Layer: FALLBACK or ML | Score: 75-78")
+    print("=" * 60)
+    huge_payload = {"data": "A" * 5100}
+    send("POST", "/api/users", huge_payload, label="Buffer Overflow")
     time.sleep(DELAY_LONG)
 
 def phase_crlf():
     print("\n" + "=" * 60)
-    print("[PHASE 8/8] CRLF Injection Attack")
+    print("[PHASE 9/9] CRLF Injection Attack")
     print("  Expected: CRLF Injection | Layer: FALLBACK | Score: 78")
     print("=" * 60)
     payloads = [
@@ -207,6 +217,7 @@ PHASES = {
     "bruteforce": phase_bruteforce,
     "enumeration": phase_enumeration,
     "file": phase_file_disclosure,
+    "overflow": phase_buffer_overflow,
     "crlf": phase_crlf,
 }
 
