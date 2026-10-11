@@ -55,6 +55,7 @@
       <span class="hdr-time-label">SYSTEM TIME</span>
       <span id="sys-time" class="hdr-time">--:--:--</span>
       <span id="conn-status" class="badge badge--warn">◌ CONNECTING</span>
+      <a class="hdr-logout" href="/dashboard/logout">LOGOUT</a>
     </div>
   </header>
 
@@ -175,7 +176,7 @@
       <div class="panel-title">
         ▸ INTRUSION LOG
         <span class="panel-actions">
-          <button class="btn-sm btn-sim" onclick="simulateAttack()">⚡ SIMULATE ATTACK</button>
+          <button class="btn-sm btn-sim" id="btn-sim" onclick="simulateAttack()">⚡ SIMULATE ATTACK</button>
         </span>
       </div>
       <div class="table-scroll">

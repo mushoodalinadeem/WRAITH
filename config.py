@@ -6,10 +6,27 @@ No magic numbers or magic strings anywhere else in the codebase.
 
 import os
 
+WRAITH_ENV = os.getenv("WRAITH_ENV", "development").strip().lower()
+IS_PRODUCTION = WRAITH_ENV in ("production", "prod")
+IS_TEST = WRAITH_ENV in ("test", "testing")
+
 FLASK_SECRET_KEY = os.getenv("SECRET_KEY", "wraith-dev-secret-key")
-FLASK_DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+FLASK_DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true" and not IS_PRODUCTION
 FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
 FLASK_PORT = int(os.getenv("FLASK_PORT", 5000))
+
+DASHBOARD_USERNAME = os.getenv("DASHBOARD_USERNAME", "operator")
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
+DASHBOARD_PASSWORD_HASH = os.getenv("DASHBOARD_PASSWORD_HASH", "")
+
+SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true"
+SESSION_HOURS = int(os.getenv("SESSION_HOURS", 8))
+ENABLE_DEMO = os.getenv("ENABLE_DEMO", "false").lower() == "true"
+
+LOGIN_RATE_THRESHOLD = int(os.getenv("LOGIN_RATE_THRESHOLD", 5))
+LOGIN_RATE_WINDOW = int(os.getenv("LOGIN_RATE_WINDOW", 300))
+MIN_PASSWORD_LENGTH = 12
+DEV_SECRET_KEY = "wraith-dev-secret-key"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE_PATH = os.getenv("WRAITH_DB_PATH", os.path.join(BASE_DIR, "data", "wraith.db"))
@@ -83,3 +100,22 @@ FALLBACK_SCORE_CRLF = int(os.getenv("FALLBACK_SCORE_CRLF", 78))
 FALLBACK_SCORE_OVERFLOW = int(os.getenv("FALLBACK_SCORE_OVERFLOW", 75))
 BUFFER_OVERFLOW_PAYLOAD_THRESHOLD = int(os.getenv("BUFFER_OVERFLOW_PAYLOAD_THRESHOLD", 5000))
 EMERGENCY_COUNTER_LIMIT = int(os.getenv("EMERGENCY_COUNTER_LIMIT", 10000))
+
+
+def validate_runtime_config() -> None:
+    """Refuse to start in production with placeholder secrets."""
+    if IS_TEST:
+        return
+    if not IS_PRODUCTION:
+        return
+    if not FLASK_SECRET_KEY or FLASK_SECRET_KEY == DEV_SECRET_KEY:
+        raise RuntimeError("SECRET_KEY must be set to a unique value in production")
+    if len(FLASK_SECRET_KEY) < 32:
+        raise RuntimeError("SECRET_KEY must be at least 32 characters in production")
+    if FLASK_DEBUG:
+        raise RuntimeError("FLASK_DEBUG cannot be enabled in production")
+    if not DASHBOARD_PASSWORD_HASH:
+        if not DASHBOARD_PASSWORD or len(DASHBOARD_PASSWORD) < MIN_PASSWORD_LENGTH:
+            raise RuntimeError(
+                "DASHBOARD_PASSWORD (12+ chars) or DASHBOARD_PASSWORD_HASH is required in production"
+            )

@@ -428,6 +428,20 @@ function addTableRow(log) {
 // ────────────────────────────────────────────────
 // Forensic Detail
 // ────────────────────────────────────────────────
+function _redirectIfUnauthorized(res) {
+  if (res.status === 401) {
+    window.location.href = '/dashboard/login';
+    throw new Error('Unauthorized');
+  }
+  return res;
+}
+
+async function _fetchJson(url, opts) {
+  const res = await fetch(url, { credentials: 'same-origin', ...(opts || {}) });
+  _redirectIfUnauthorized(res);
+  return res;
+}
+
 async function showForensicDetail(logId, clickedRow) {
   if (_activeRowId) {
     const prev = document.querySelector(`tr[data-id="${_activeRowId}"]`);
@@ -441,7 +455,7 @@ async function showForensicDetail(logId, clickedRow) {
     '<div class="forensic-empty">[ LOADING... ]</div>';
 
   try {
-    const res  = await fetch(`/logs/${logId}`);
+    const res  = await _fetchJson(`/logs/${logId}`);
     const data = await res.json();
     if (!res.ok || data.status !== 'ok') throw new Error(data.message || 'Request failed');
     _renderForensicDetail(data.log);
@@ -525,7 +539,7 @@ function _updateBreakdown(attacksByType) {
 // ────────────────────────────────────────────────
 async function fetchStats() {
   try {
-    const res  = await fetch('/stats');
+    const res  = await _fetchJson('/stats');
     const data = await res.json();
     if (!res.ok || data.status !== 'ok') return;
     const s = data.stats;

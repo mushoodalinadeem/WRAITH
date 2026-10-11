@@ -491,6 +491,59 @@ canvas#attack-chart{width:100%!important;height:100%!important;}
 }
 
 /* ═══════════════════════════ RESPONSIVE ═══════════════════════════ */
+.hdr-logout{
+  margin-left:12px;
+  color:var(--text-dim);
+  text-decoration:none;
+  border:1px solid var(--border);
+  padding:4px 8px;
+  font-size:11px;
+  letter-spacing:.08em;
+}
+.hdr-logout:hover{color:var(--text);border-color:var(--border-hi);}
+.login-body{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:100vh;
+}
+.login-card{
+  width:min(420px,92vw);
+  background:var(--bg-panel);
+  border:1px solid var(--border);
+  padding:28px 24px 32px;
+  position:relative;
+  z-index:1;
+}
+.login-brand{
+  font-family:var(--font-vt);
+  font-size:42px;
+  color:var(--blue);
+  letter-spacing:.12em;
+}
+.login-sub{color:var(--text-muted);margin:0 0 18px;letter-spacing:.2em;font-size:12px;}
+.login-error{color:var(--alert);min-height:1.2em;margin-bottom:12px;}
+.login-card label{display:block;margin:12px 0 6px;color:var(--text-dim);letter-spacing:.12em;font-size:11px;}
+.login-card input{
+  width:100%;
+  background:var(--bg-inset);
+  border:1px solid var(--border);
+  color:var(--text);
+  padding:10px 12px;
+  font-family:var(--font-mono);
+}
+.login-card button{
+  width:100%;
+  margin-top:18px;
+  background:var(--blue-dark);
+  color:var(--text);
+  border:1px solid var(--blue);
+  padding:10px 12px;
+  cursor:pointer;
+  letter-spacing:.16em;
+}
+.login-card button:hover{background:var(--blue-dim);}
+
 @media(max-width:960px){
   .grid{
     grid-template-columns:1fr;

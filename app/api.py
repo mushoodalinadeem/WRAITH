@@ -98,10 +98,39 @@ def classify():
 
 @api_bp.route("/demo/run", methods=["POST"])
 def demo_run():
+    if not config.ENABLE_DEMO:
+        return jsonify({
+            "status": "error",
+            "message": "Demo simulation is disabled"
+        }), 403
+
+    import subprocess
+    import sys
+    import threading
+    from pathlib import Path
+
+    project_root = Path(__file__).resolve().parent.parent
+    script = project_root / "demo" / "simulate_attack.py"
+    if not script.is_file():
+        return jsonify({"status": "error", "message": "Demo script is missing"}), 500
+
+    def _run():
+        subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--url",
+                f"http://127.0.0.1:{config.FLASK_PORT}",
+            ],
+            cwd=str(project_root),
+            check=False,
+        )
+
+    threading.Thread(target=_run, name="wraith-demo", daemon=True).start()
     return jsonify({
         "status": "ok",
-        "message": "Demo simulation must be run externally — see demo/simulate_attack.py"
-    }), 200
+        "message": "Simulation started against local honeypot routes"
+    }), 202
 
 @api_bp.route("/stats", methods=["GET"])
 def get_stats():
