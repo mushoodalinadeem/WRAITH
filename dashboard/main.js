@@ -610,12 +610,32 @@ function _processLog(log) {
   addTableRow(log);
 }
 
-function connectSSE() {
+async function connectSSE() {
   if (_eventSource) { _eventSource.close(); _eventSource = null; }
 
   const statusEl = document.getElementById('conn-status');
   statusEl.className = 'badge badge--warn';
   statusEl.textContent = '◌ CONNECTING';
+
+  // Pre-flight auth check — EventSource doesn't expose HTTP status codes,
+  // so a 401 from /stream would silently loop in onerror forever.
+  try {
+    const probe = await fetch(`/stream?since_id=${_sseStartId}`, {
+      method: 'GET',
+      headers: { 'Accept': 'text/event-stream' }
+    });
+    if (probe.status === 401) {
+      statusEl.className = 'badge badge--err';
+      statusEl.textContent = '✕ AUTH FAILED';
+      _addTermSysLine('Session expired. Redirecting to login...');
+      setTimeout(() => { window.location.href = '/dashboard/login'; }, 1500);
+      return;
+    }
+    // Abort the probe — we only needed the status code
+    probe.body?.cancel();
+  } catch {
+    // Network error — fall through and let EventSource try anyway
+  }
 
   _eventSource = new EventSource(`/stream?since_id=${_sseStartId}`);
 
@@ -684,6 +704,16 @@ async function _loadInitialLogs() {
 // Init
 // ────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+  // Session check — if the session is stale (e.g. after server restart),
+  // all API calls silently fail with 401 leaving a broken dashboard.
+  try {
+    const authCheck = await fetch('/stats');
+    if (authCheck.status === 401) {
+      window.location.href = '/dashboard/login';
+      return;
+    }
+  } catch { /* network error — proceed and let SSE handle reconnect */ }
+
   _startClock();
   _Chart.init();
   await _loadInitialLogs();
