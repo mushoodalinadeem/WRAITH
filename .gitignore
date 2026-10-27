@@ -12,3 +12,9 @@ __pycache__/
 .venv*/
 cookies.txt
 cookies.txt
+
+# Local working files
+graphify-out/
+scratch/
+.vscode/
+.env
