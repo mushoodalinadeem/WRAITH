@@ -148,6 +148,8 @@ def phase_flood():
     print("[PHASE 4/9] HTTP Flood Attack")
     print("   Expected: HTTP Flood | Layer: RULE | Score: 95")
     print("   Firing 30 parallel requests concurrently via ThreadPoolExecutor...")
+    print("   NOTE: threshold is strict (>20/s) — the first 20 requests log as")
+    print("   Normal and only later ones are labeled HTTP Flood (by design).")
     print("=" * 60)
     flood_headers = {"User-Agent": "DDoS-Bot/2.0 (Flood-Burst)"}
     

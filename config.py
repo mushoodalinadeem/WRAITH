@@ -99,6 +99,9 @@ FALLBACK_SCORE_TRAVERSAL = int(os.getenv("FALLBACK_SCORE_TRAVERSAL", 80))
 FALLBACK_SCORE_CRLF = int(os.getenv("FALLBACK_SCORE_CRLF", 78))
 FALLBACK_SCORE_OVERFLOW = int(os.getenv("FALLBACK_SCORE_OVERFLOW", 75))
 BUFFER_OVERFLOW_PAYLOAD_THRESHOLD = int(os.getenv("BUFFER_OVERFLOW_PAYLOAD_THRESHOLD", 5000))
+# NEW (Fix 5): how many URL-decode passes the keyword fallback applies when
+# scanning. 2 catches double encoding: %253Cscript -> %3Cscript -> <script.
+MAX_URL_DECODE_PASSES = int(os.getenv("MAX_URL_DECODE_PASSES", 2))
 EMERGENCY_COUNTER_LIMIT = int(os.getenv("EMERGENCY_COUNTER_LIMIT", 10000))
 
 

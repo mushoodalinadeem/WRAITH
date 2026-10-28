@@ -37,7 +37,10 @@ def _extract_request_data() -> dict:
         "user_agent": request.headers.get("User-Agent", "")
     }
 
-@honeypot_bp.route("/admin/login", methods=["GET", "POST"])
+# strict_slashes=False so POSTs to /admin/login/ (trailing slash) are handled
+# here instead of being 308-redirected — otherwise they never reach the
+# logging pipeline and the brute-force counter never sees them.
+@honeypot_bp.route("/admin/login", methods=["GET", "POST"], strict_slashes=False)
 def admin_login():
     data = _extract_request_data()
     log_request(data)
@@ -152,6 +155,9 @@ def api_search():
                     methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 def catch_all(unknown_path):
     data = _extract_request_data()
+    # Single source of truth for "unknown path": the router landed here, so no
+    # registered route matched. Used by the enumeration rule in logger.py.
+    data["is_catchall"] = True
     log_request(data)
     return jsonify({
         "status": "error",

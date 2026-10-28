@@ -16,7 +16,8 @@ from datetime import datetime, timezone
 from flask import Blueprint, jsonify, request
 import config
 from app.database import get_db_connection
-from app.logger import run_pipeline, persist_log
+from app.classifier import run_pipeline
+from app.logger import persist_log
 
 api_bp = Blueprint("api", __name__)
 
@@ -143,6 +144,14 @@ def get_stats():
         ml_hits = conn.execute("SELECT COUNT(*) FROM logs WHERE layer = 'ml' AND is_simulation = 0").fetchone()[0] or 0
         rule_hits = conn.execute("SELECT COUNT(*) FROM logs WHERE layer = 'rule' AND is_simulation = 0").fetchone()[0] or 0
         fallback_hits = conn.execute("SELECT COUNT(*) FROM logs WHERE layer = 'fallback' AND is_simulation = 0").fetchone()[0] or 0
+        # Fix 4: ML won while the fallback ALSO fired with a different keyword
+        # label (from the signals line in the report text). Rows where the
+        # fallback stayed Normal don't count — there was nothing to override.
+        ml_overrides = conn.execute(
+            "SELECT COUNT(*) FROM logs WHERE layer = 'ml' AND is_simulation = 0 "
+            "AND report NOT LIKE '%fallback: Normal,%' "
+            "AND report NOT LIKE '%fallback: ' || attack_type || ',%'"
+        ).fetchone()[0] or 0
         
         attack_counts = conn.execute(
             "SELECT attack_type, COUNT(*) as count FROM logs WHERE attack_type != 'Normal' AND is_simulation = 0 GROUP BY attack_type"
@@ -172,6 +181,7 @@ def get_stats():
                 "current_threat_level": level,
                 "max_score": max_score,
                 "ml_hits": ml_hits,
+                "ml_overrides": ml_overrides,
                 "rule_hits": rule_hits,
                 "fallback_hits": fallback_hits
             }

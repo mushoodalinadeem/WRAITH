@@ -5,6 +5,7 @@ Serves the forensic monitoring dashboard at /dashboard/.
 Login is required for HTML pages. CSS/JS stay public so the login page can load.
 """
 
+import html as htmllib
 import os
 import secrets
 
@@ -44,7 +45,9 @@ def _login_page(error: str = ""):
     with open(path, encoding="utf-8") as handle:
         html = handle.read()
     html = html.replace("__CSRF_TOKEN__", session["csrf_token"])
-    html = html.replace("__LOGIN_ERROR__", error)
+    # HTML-escape the error value so the placeholder can never become an
+    # injection point (today the values are fixed strings; this guarantees it).
+    html = html.replace("__LOGIN_ERROR__", htmllib.escape(error))
     return html
 
 
@@ -104,5 +107,11 @@ def dashboard_static(filename):
     if ".." in filename or filename.startswith("/"):
         return jsonify({"error": "Forbidden"}), 403
     if filename == "login.html":
-        return send_from_directory(_DASHBOARD_DIR, "login.html")
+        # login.html is a template with __CSRF_TOKEN__/__LOGIN_ERROR__
+        # placeholders, not a finished page — redirect to the real login
+        # route so the shared renderer fills them in. Redirect (not local
+        # rendering) keeps this a one-liner and avoids duplicating the
+        # substitution logic; the login route already redirects
+        # authenticated visitors to the dashboard.
+        return redirect(url_for("admin.login"))
     return send_from_directory(_DASHBOARD_DIR, filename)

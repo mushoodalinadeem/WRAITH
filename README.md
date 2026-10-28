@@ -2,6 +2,10 @@
 
 WRAITH is an advanced, high-performance honeypot designed to intercept, log, and classify malicious web traffic in real-time.
 
+## Requirements
+
+- **Python 3.11 – 3.13.** The Dockerfile uses 3.11. The pinned `requirements.txt` does **not** build on Python 3.14 (sklearn/numpy wheels are not yet published for it).
+
 ## Architecture Limitations & Production Deployment
 
 WRAITH uses an asynchronous, thread-safe memory queue (`collections.deque`) to buffer incoming attacks during HTTP floods. Because this queue and the rate-limiting sliding windows reside in local application memory, **WRAITH must be run as a single process**.
@@ -92,6 +96,11 @@ The `config.py` validator will refuse to start in production if placeholder secr
 | ML (Random Forest) | Optional | CSIC 2010 trained classifier — requires `ml/model.pkl` |
 
 The ML layer activates automatically when a trained `model.pkl` is present at startup.
+
+## Detection Behavior Notes
+
+- **HTTP Flood threshold is strict (`>`):** the rule fires when an IP exceeds `RATE_FLOOD_THRESHOLD = 20` requests per second, so in a 30-request burst the first 20 are logged as `Normal` and only the later ones are labeled `HTTP Flood`. This is by design, not a bug.
+- **SSE stream concurrency:** each `/stream` connection holds one worker thread for its lifetime, so concurrent dashboard viewers are capped at the gunicorn thread count (8). Fine for a single operator; not designed for a crowd.
 
 ## Endpoints
 

@@ -18,3 +18,5 @@ graphify-out/
 scratch/
 .vscode/
 .env
+graphify-out/
+PROJECT_REPORT.md
