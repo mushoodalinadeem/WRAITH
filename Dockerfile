@@ -19,4 +19,4 @@ VOLUME ["/app/data"]
 USER wraith
 
 EXPOSE 5000
-CMD ["python3", "main.py"]
+CMD ["gunicorn", "--config", "gunicorn.conf.py", "main:app"]
