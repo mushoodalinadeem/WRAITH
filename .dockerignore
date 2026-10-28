@@ -27,3 +27,9 @@ graphify-out/
 *.db
 *.db-wal
 *.db-shm
+
+.venv/
+graphify-out/
+*.db
+*.db-wal
+*.db-shm
