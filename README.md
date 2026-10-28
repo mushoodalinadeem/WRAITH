@@ -85,7 +85,10 @@ All runtime configuration is controlled via environment variables. See `config.p
 | `WRAITH_DB_PATH` | No | Custom SQLite path (default: `data/wraith.db`) |
 | `WRAITH_MODEL_PATH` | No | Custom model path (default: `ml/model.pkl`) |
 
-The `config.py` validator will refuse to start in production if placeholder secrets are detected.
+The `config.py` validator will refuse to start in production if the session
+secret is missing, the dev default, a known placeholder (see
+`PLACEHOLDER_SECRETS` — including any value starting with `replace-with`), or
+shorter than 32 characters.
 
 ## Detection Layers
 

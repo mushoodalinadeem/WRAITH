@@ -104,6 +104,11 @@ BUFFER_OVERFLOW_PAYLOAD_THRESHOLD = int(os.getenv("BUFFER_OVERFLOW_PAYLOAD_THRES
 MAX_URL_DECODE_PASSES = int(os.getenv("MAX_URL_DECODE_PASSES", 2))
 EMERGENCY_COUNTER_LIMIT = int(os.getenv("EMERGENCY_COUNTER_LIMIT", 10000))
 
+# Secret values that must never reach production. Checked in
+# validate_runtime_config(): exact match, or any value starting with the
+# example placeholder prefix ("replace-with-...").
+PLACEHOLDER_SECRETS = ("replace-with-a-long-random-string", "replace-with")
+
 
 def validate_runtime_config() -> None:
     """Refuse to start in production with placeholder secrets."""
@@ -111,8 +116,14 @@ def validate_runtime_config() -> None:
         return
     if not IS_PRODUCTION:
         return
-    if not FLASK_SECRET_KEY or FLASK_SECRET_KEY == DEV_SECRET_KEY:
-        raise RuntimeError("SECRET_KEY must be set to a unique value in production")
+    if (not FLASK_SECRET_KEY
+            or FLASK_SECRET_KEY == DEV_SECRET_KEY
+            or FLASK_SECRET_KEY in PLACEHOLDER_SECRETS
+            or FLASK_SECRET_KEY.startswith(PLACEHOLDER_SECRETS)):
+        raise RuntimeError(
+            "SECRET_KEY must be set to a unique value in production "
+            "(placeholder and dev-default values are rejected)"
+        )
     if len(FLASK_SECRET_KEY) < 32:
         raise RuntimeError("SECRET_KEY must be at least 32 characters in production")
     if FLASK_DEBUG:
