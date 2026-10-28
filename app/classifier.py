@@ -39,6 +39,15 @@ _last_cleanup = 0.0
 
 _ENUM_IGNORE = frozenset({"/favicon.ico", "/robots.txt"})
 
+def _normalize_path(path: str) -> str:
+    """
+    Normalize a request path for brute-force target comparison: strip any
+    query string, then trailing slashes — so "/admin/login/", "/admin/login"
+    and "/admin/login?x=1" all count as the same attack surface and a
+    rotating slash cannot evade the brute-force counter.
+    """
+    return (path or "").split("?", 1)[0].rstrip("/")
+
 def _check_rules(request_data: dict) -> tuple:
     """
     Check three rate-based attack patterns using in-memory counters.
@@ -68,7 +77,8 @@ def _check_rules(request_data: dict) -> tuple:
         # 1. Web Brute Force — most specific: repeated POSTs to the fake
         #    admin login. Checked first so a hot generic rule can never
         #    prevent the brute counter from being consulted.
-        if method.upper() == "POST" and path == config.BRUTEFORCE_TARGET:
+        if method.upper() == "POST" and (
+                _normalize_path(path) == _normalize_path(config.BRUTEFORCE_TARGET)):
             _bruteforce_counter[ip] = [
                 t for t in _bruteforce_counter[ip]
                 if now - t < config.RATE_BRUTEFORCE_WINDOW
