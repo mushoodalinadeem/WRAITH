@@ -22,3 +22,8 @@ ml/data/
 
 # Test files
 scratch/
+.venv/
+graphify-out/
+*.db
+*.db-wal
+*.db-shm
